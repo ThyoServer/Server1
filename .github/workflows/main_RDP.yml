@@ -28,11 +28,13 @@ jobs:
           Write-Host "Download Chisel Engine..."
           Invoke-WebRequest -Uri "https://github.com/jpillora/chisel/releases/download/v1.9.1/chisel_1.9.1_windows_amd64.gz" -OutFile "chisel.gz"
           
-          Write-Host "Mengekstrak file..."
-          7z e chisel.gz
+          Write-Host "Mengekstrak file ke folder sementara..."
+          # Ekstrak file dan masukkan otomatis ke folder bernama "temp_chisel"
+          7z e chisel.gz -o"temp_chisel"
           
-          Write-Host "Mengubah nama menjadi aplikasi (.exe)..."
-          Rename-Item -Path "chisel" -NewName "chisel.exe" -Force
+          Write-Host "Memaksa perubahan nama menjadi .exe..."
+          # Pindahkan apa pun isi dari folder temp_chisel dan jadikan chisel.exe
+          Move-Item -Path "temp_chisel\*" -Destination "chisel.exe" -Force
           
           Write-Host "Membuka Terowongan ke Railway..."
           # Perintah ini mengirim RDP GitHub masuk ke dalam Railway milikmu
