@@ -1,4 +1,4 @@
-name: RDP
+name: Server Thyo
 
 on:
   workflow_dispatch:
@@ -14,8 +14,7 @@ jobs:
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force;
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force;
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 0 -Force;
-          netsh advfirewall firewall delete rule name="RDP-Tailscale" -ErrorAction SilentlyContinue;
-          netsh advfirewall firewall add rule name="RDP-Tailscale" dir=in action=allow protocol=TCP localport=3389;
+          netsh advfirewall firewall add rule name="RDP-Tunnel" dir=in action=allow protocol=TCP localport=3389;
           Restart-Service -Name TermService -Force;
 
       - name: Create RDP User
@@ -42,21 +41,30 @@ jobs:
           # Matikan Animasi UI biar ringan
           Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects" -Name "VisualFXSetting" -Value 2 -Force;
 
-      - name: Install Tailscale
+      - name: Membuka Terowongan RDP Tanpa VPN (Bore)
         run: |
-          $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi";
-          $installerPath = "$env:TEMP\tailscale.msi";
-          Invoke-WebRequest -Uri $tsUrl -OutFile $installerPath;
-          Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" -Wait;
-          Remove-Item $installerPath -Force;
-
-      - name: Establish Tailscale Connection
-        run: |
-          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=tskey-auth-kAbLa1LGFP11CNTRL-yMEYPuAHG24QrSD4JKT924nWZ3x4twAY --hostname=gh-runner-$env:GITHUB_RUN_ID;
-          $tsIP = $null;
-          $retries = 0;
-          while (-not $tsIP -and $retries -lt 10) { $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4; Start-Sleep -Seconds 5; $retries++; };
-          Add-Content -Path $env:GITHUB_ENV -Value "TAILSCALE_IP=$tsIP";
+          Write-Host "Mendownload Mesin Tunnel..."
+          Invoke-WebRequest -Uri "https://github.com/ekzhang/bore/releases/download/v0.5.1/bore-v0.5.1-x86_64-pc-windows-msvc.zip" -OutFile "bore.zip"
+          Expand-Archive bore.zip -DestinationPath .
+          
+          Write-Host "Membuka jalur rahasia ke publik..."
+          Start-Process -FilePath ".\bore.exe" -ArgumentList "local 3389 --to bore.pub" -NoNewWindow -RedirectStandardOutput "bore.log" -RedirectStandardError "bore.log"
+          
+          # Tunggu 7 detik sampai link publik tercipta
+          Start-Sleep -Seconds 7
+          
+          $log = Get-Content "bore.log" -Raw
+          $match = [regex]::Match($log, 'bore\.pub:(\d+)')
+          if ($match.Success) {
+              $boreIP = $match.Value
+              Write-Host "✅ Terowongan Berhasil: $boreIP"
+          } else {
+              $boreIP = "Error: Gagal membuat terowongan"
+              Write-Host "Log Error:"
+              Write-Host $log
+          }
+          
+          Add-Content -Path $env:GITHUB_ENV -Value "PUBLIC_IP=$boreIP"
 
       - name: Send Data to Web Dashboard
         run: |
@@ -66,7 +74,7 @@ jobs:
           
           $payload = @{
             status    = "Online"
-            ip        = $env:TAILSCALE_IP
+            ip        = $env:PUBLIC_IP
             username  = "thyo"
             password  = $env:RDP_CREDS
             cpu       = $cpu
@@ -75,11 +83,8 @@ jobs:
           } | ConvertTo-Json
           
           Write-Host "Mengirim data JSON ke server Railway..."
-          
-          # Kirim request POST ke web kamu yang ada di Railway
           Invoke-RestMethod -Uri "https://webserver.up.railway.app/api/update-rdp" -Method Post -Body $payload -ContentType 'application/json'
-          
-          Write-Host "Data berhasil terkirim ke Web Dashboard!"
+          Write-Host "✅ Data berhasil terkirim ke Web Dashboard!"
 
       - name: CEK RDP DI WEB DASHBOARD
         run: |
@@ -91,4 +96,4 @@ jobs:
 
       - name: Maintain Connection
         run: |
-          while ($true) { Write-Host "[$(Get-Date)] RDP Active - Use Ctrl+C in workflow to terminate"; Start-Sleep -Seconds 300; };
+          while ($true) { Write-Host "[$(Get-Date)] RDP Active - Server berjalan stabil"; Start-Sleep -Seconds 300; }
