@@ -1,94 +1,35 @@
-name: RDP
+name: Thyo Private Tunnel RDP
 
 on:
   workflow_dispatch:
 
 jobs:
-  secure-rdp:
+  build-rdp:
     runs-on: windows-latest
     timeout-minutes: 3600
 
     steps:
-      - name: Configure Core RDP Settings
+      - name: Konfigurasi Windows RDP
         run: |
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force;
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force;
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 0 -Force;
-          netsh advfirewall firewall delete rule name="RDP-Tailscale" -ErrorAction SilentlyContinue;
-          netsh advfirewall firewall add rule name="RDP-Tailscale" dir=in action=allow protocol=TCP localport=3389;
-          Restart-Service -Name TermService -Force;
-
-      - name: Create RDP User
-        run: |
-          $charSet = @{ Upper = [char[]](65..90); Lower = [char[]](97..122); Number = [char[]](48..57) };
-          $rawPassword = @();
-          $rawPassword += $charSet.Upper | Get-Random -Count 5;
-          $rawPassword += $charSet.Lower | Get-Random -Count 5;
-          $rawPassword += $charSet.Number | Get-Random -Count 4;
-          $password = -join ($rawPassword | Sort-Object { Get-Random });
-          $securePass = ConvertTo-SecureString $password -AsPlainText -Force;
-          New-LocalUser -Name "thyo" -Password $securePass -AccountNeverExpires;
-          Add-LocalGroupMember -Group "Administrators" -Member "thyo";
-          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "thyo";
-          Add-Content -Path $env:GITHUB_ENV -Value "RDP_CREDS=$password";
-
-      - name: Windows Optimization & Web Dev Ports
-        run: |
-          # Buka port untuk Web Development
-          netsh advfirewall firewall add rule name="Web-Dev-Ports" dir=in action=allow protocol=TCP localport=3000,5500,8080,80;
-          # Nyalakan Audio
-          Set-Service -Name "Audiosrv" -StartupType Automatic; Start-Service -Name "Audiosrv";
-          Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "fDisableAudioCapture" -Value 0 -Force;
-          # Matikan Animasi UI biar ringan
-          Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects" -Name "VisualFXSetting" -Value 2 -Force;
-
-      - name: Install Tailscale
-        run: |
-          $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi";
-          $installerPath = "$env:TEMP\tailscale.msi";
-          Invoke-WebRequest -Uri $tsUrl -OutFile $installerPath;
-          Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" -Wait;
-          Remove-Item $installerPath -Force;
-
-      - name: Establish Tailscale Connection
-        run: |
-          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=tskey-auth-kAbLa1LGFP11CNTRL-yMEYPuAHG24QrSD4JKT924nWZ3x4twAY --hostname=gh-runner-$env:GITHUB_RUN_ID;
-          $tsIP = $null;
-          $retries = 0;
-          while (-not $tsIP -and $retries -lt 10) { $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4; Start-Sleep -Seconds 5; $retries++; };
-          Add-Content -Path $env:GITHUB_ENV -Value "TAILSCALE_IP=$tsIP";
-
-      - name: Send Data to Web Dashboard
-        run: |
-          $ram = [math]::Round((Get-CimInstance Win32_PhysicalMemory | Measure-Object -Property Capacity -Sum).Sum / 1GB)
-          $cpu = (Get-CimInstance Win32_Processor).Name
-          $startTime = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 0 -Force
+          netsh advfirewall firewall add rule name="RDP-Tunnel" dir=in action=allow protocol=TCP localport=3389
+          Restart-Service -Name TermService -Force
           
-          $payload = @{
-            status    = "Online"
-            ip        = $env:TAILSCALE_IP
-            username  = "thyo"
-            password  = $env:RDP_CREDS
-            cpu       = $cpu
-            ram       = "$ram GB"
-            startTime = $startTime
-          } | ConvertTo-Json
-          
-          Write-Host "Mengirim data JSON ke server Railway..."
-          
-          # Kirim request POST ke web kamu yang ada di Railway
-          Invoke-RestMethod -Uri "https://webserver.up.railway.app/api/update-rdp" -Method Post -Body $payload -ContentType 'application/json'
-          
-          Write-Host "Data berhasil terkirim ke Web Dashboard!"
+          Write-Host "Membuat Akun RDP..."
+          $password = ConvertTo-SecureString "ThyoRDP123" -AsPlainText -Force
+          New-LocalUser -Name "admin_user" -Password $password -AccountNeverExpires
+          Add-LocalGroupMember -Group "Administrators" -Member "admin_user"
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "admin_user"
 
-      - name: CEK RDP DI WEB DASHBOARD
+      - name: Menghubungkan ke Server Railway Thyo
         run: |
-          Write-Host "`n=========================================";
-          Write-Host "RDP BERHASIL DIBUAT DAN DATA TERKIRIM!";
-          Write-Host "Silakan cek IP dan Password kamu di link ini:";
-          Write-Host "👉 https://webserver.up.railway.app/";
-          Write-Host "=========================================`n";
-
-      - name: Maintain Connection
-        run: |
-          while ($true) { Write-Host "[$(Get-Date)] RDP Active - Use Ctrl+C in workflow to terminate"; Start-Sleep -Seconds 300; };
+          Write-Host "Download Chisel Engine..."
+          Invoke-WebRequest -Uri "https://github.com/jpillora/chisel/releases/download/v1.9.1/chisel_1.9.1_windows_amd64.gz" -OutFile "chisel.gz"
+          7z e chisel.gz
+          Rename-Item -Path "chisel_1.9.1_windows_amd64" -NewName "chisel.exe"
+          
+          Write-Host "Membuka Terowongan ke Railway..."
+          # Perintah ini mengirim RDP GitHub masuk ke dalam Railway milikmu
+          .\chisel.exe client https://serverubuntu.up.railway.app R:3389:127.0.0.1:3389
