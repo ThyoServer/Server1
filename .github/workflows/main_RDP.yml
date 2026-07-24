@@ -38,25 +38,21 @@ jobs:
           Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "fDisableAudioCapture" -Value 0 -Force;
           Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects" -Name "VisualFXSetting" -Value 2 -Force;
 
-      - name: Buka Terowongan & Tahan Server (Anti-Mati)
+      - name: Buka Terowongan (Serveo) & Tahan Server
         run: |
-          Write-Host "Mendownload Mesin Tunnel..."
-          Invoke-WebRequest -Uri "https://github.com/ekzhang/bore/releases/download/v0.5.1/bore-v0.5.1-x86_64-pc-windows-msvc.zip" -OutFile "bore.zip"
-          Expand-Archive bore.zip -DestinationPath .
+          Write-Host "Membuka jalur Serveo via SSH bawaan Windows..."
+          Start-Process -FilePath "ssh" -ArgumentList "-o StrictHostKeyChecking=no -R 0:localhost:3389 serveo.net" -NoNewWindow -RedirectStandardOutput "tunnel_out.log" -RedirectStandardError "tunnel_err.log"
           
-          Write-Host "Membuka jalur rahasia ke publik..."
-          Start-Process -FilePath ".\bore.exe" -ArgumentList "local 3389 --to bore.pub" -NoNewWindow -RedirectStandardOutput "bore_out.log" -RedirectStandardError "bore_err.log"
+          Start-Sleep -Seconds 12
           
-          Start-Sleep -Seconds 7
-          
-          $log = (Get-Content "bore_out.log", "bore_err.log" -ErrorAction SilentlyContinue) -join "`n"
-          $match = [regex]::Match($log, 'bore\.pub:(\d+)')
+          $log = (Get-Content "tunnel_out.log", "tunnel_err.log" -ErrorAction SilentlyContinue) -join "`n"
+          $match = [regex]::Match($log, 'serveo\.net:(\d+)')
           
           if ($match.Success) {
-              $boreIP = $match.Value
-              Write-Host "Terowongan Berhasil: $boreIP"
+              $tunnelIP = "serveo.net:" + $match.Groups[1].Value
+              Write-Host "✅ Terowongan Berhasil: $tunnelIP"
           } else {
-              $boreIP = "Error: Gagal membuat terowongan"
+              $tunnelIP = "Error: Gagal mendapatkan link dari Serveo"
               Write-Host "Log Error: $log"
           }
           
@@ -67,7 +63,7 @@ jobs:
           
           $payload = @{
             status    = "Online"
-            ip        = $boreIP
+            ip        = $tunnelIP
             username  = "thyo"
             password  = $env:RDP_CREDS
             cpu       = $cpu
@@ -76,12 +72,11 @@ jobs:
           } | ConvertTo-Json
           
           Invoke-RestMethod -Uri "https://webserver.up.railway.app/api/update-rdp" -Method Post -Body $payload -ContentType 'application/json'
-          Write-Host "Data berhasil terkirim ke Web Dashboard!"
+          Write-Host "✅ Data berhasil terkirim ke Web Dashboard!"
           
           Write-Host "`n========================================="
           Write-Host "RDP BERHASIL DIBUAT DAN SIAP DIGUNAKAN!"
           Write-Host "👉 https://webserver.up.railway.app/"
           Write-Host "=========================================`n"
           
-          # Bagian ini menahan step agar tidak selesai, sehingga bore.exe tetap hidup!
           while ($true) { Write-Host "[$(Get-Date)] RDP Active - Server berjalan stabil"; Start-Sleep -Seconds 300; }
