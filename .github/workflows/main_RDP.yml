@@ -68,8 +68,8 @@ jobs:
           Write-Host "Menjalankan Playit.gg..."
           Start-Process -FilePath ".\playit.exe" -NoNewWindow -RedirectStandardOutput "playit_out.log" -RedirectStandardError "playit_err.log"
           
-          Write-Host "Menunggu link klaim dan IP tercipta (15 detik)..."
-          Start-Sleep -Seconds 15
+          Write-Host "Menunggu link klaim dan IP tercipta (20 detik)..."
+          Start-Sleep -Seconds 20
           
           $log = (Get-Content "playit_out.log", "playit_err.log" -ErrorAction SilentlyContinue) -join "`n"
           
@@ -88,16 +88,22 @@ jobs:
               $log = (Get-Content "playit_out.log", "playit_err.log" -ErrorAction SilentlyContinue) -join "`n"
           }
           
-          $tcpMatch = [regex]::Match($log, 'tcp\s+([a-zA-Z0-9.-]+:\d+)')
-          $ipMatch = [regex]::Match($log, '([a-zA-Z0-9.-]+\.ply\.gg:\d+|[0-9.]+(?::\d+)?)')
+          # Pencarian IP/Port Playit yang akurat
+          $playitIP = "Error: Gagal mendeteksi IP Playit"
+          foreach ($line in ($log -split "`n")) {
+              if ($line -match '([a-zA-Z0-9-]+\.ply\.gg:\d+)') {
+                  $playitIP = $matches[1]
+                  break
+              } elseif ($line -match 'tcp\s+([0-9.]+|[a-zA-Z0-9.-]+):\d+') {
+                  if ($matches[0] -notmatch '2026') {
+                      $playitIP = $matches[1] + ":" + ($matches[0] -replace '.*:', '')
+                      break
+                  }
+              }
+          }
           
-          if ($tcpMatch.Success) {
-              $playitIP = $tcpMatch.Groups[1].Value
-          } elseif ($ipMatch.Success) {
-              $playitIP = $ipMatch.Value
-          } else {
-              $playitIP = "Error: Gagal mendeteksi IP Playit"
-              Write-Host "Log Playit: $log"
+          if ($playitIP -eq "Error: Gagal mendeteksi IP Playit" -and $log -match '([a-zA-Z0-9-]{4,}\.ply\.gg:\d+)') {
+              $playitIP = $matches[1]
           }
           
           Write-Host "✅ Terowongan Aktif: $playitIP"
@@ -121,9 +127,20 @@ jobs:
           Invoke-RestMethod -Uri "https://webserver.up.railway.app/api/update-rdp" -Method Post -Body $payload -ContentType 'application/json'
           Write-Host "✅ Data berhasil terkirim ke Web Dashboard!"
           
-          Write-Host "`n========================================="
+          # 1. CETAK INFORMASI RDP SUKSES DI ATAS
+          Write-Host "`n===================================================="
           Write-Host "RDP BERHASIL DIBUAT DAN SIAP DIGUNAKAN!"
+          Write-Host "===================================================="
+          Write-Host "📍 IP Address  : $playitIP"
+          Write-Host "👤 Username    : thyo"
+          Write-Host "🔑 Password    : $($env:RDP_CREDS)"
+          Write-Host "===================================================="
           Write-Host "👉 https://webserver.up.railway.app/"
-          Write-Host "=========================================`n"
+          Write-Host "====================================================`n"
           
-          while ($true) { Write-Host "[$(Get-Date)] RDP Active - Server berjalan stabil"; Start-Sleep -Seconds 300; }
+          # 2. BARU DI BAWAHNYA MASUK KE CONSOLE LOADING / STABILIZER SERVER
+          Write-Host "Memulai konsol penjaga server agar tetap aktif..."
+          while ($true) { 
+              Write-Host "[$(Get-Date)] RDP Active - Server berjalan stabil"
+              Start-Sleep -Seconds 300 
+          }
