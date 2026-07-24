@@ -38,7 +38,7 @@ jobs:
           Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "fDisableAudioCapture" -Value 0 -Force;
           Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects" -Name "VisualFXSetting" -Value 2 -Force;
 
-      - name: Membuka Terowongan RDP Tanpa VPN (Bore)
+      - name: Buka Terowongan & Tahan Server (Anti-Mati)
         run: |
           Write-Host "Mendownload Mesin Tunnel..."
           Invoke-WebRequest -Uri "https://github.com/ekzhang/bore/releases/download/v0.5.1/bore-v0.5.1-x86_64-pc-windows-msvc.zip" -OutFile "bore.zip"
@@ -54,24 +54,20 @@ jobs:
           
           if ($match.Success) {
               $boreIP = $match.Value
-              Write-Host "✅ Terowongan Berhasil: $boreIP"
+              Write-Host "Terowongan Berhasil: $boreIP"
           } else {
               $boreIP = "Error: Gagal membuat terowongan"
-              Write-Host "Log Error:"
-              Write-Host $log
+              Write-Host "Log Error: $log"
           }
           
-          Add-Content -Path $env:GITHUB_ENV -Value "PUBLIC_IP=$boreIP"
-
-      - name: Send Data to Web Dashboard
-        run: |
+          Write-Host "Mengirim data JSON ke server Railway..."
           $ram = [math]::Round((Get-CimInstance Win32_PhysicalMemory | Measure-Object -Property Capacity -Sum).Sum / 1GB)
           $cpu = (Get-CimInstance Win32_Processor).Name
           $startTime = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
           
           $payload = @{
             status    = "Online"
-            ip        = $env:PUBLIC_IP
+            ip        = $boreIP
             username  = "thyo"
             password  = $env:RDP_CREDS
             cpu       = $cpu
@@ -79,18 +75,13 @@ jobs:
             startTime = $startTime
           } | ConvertTo-Json
           
-          Write-Host "Mengirim data JSON ke server Railway..."
           Invoke-RestMethod -Uri "https://webserver.up.railway.app/api/update-rdp" -Method Post -Body $payload -ContentType 'application/json'
-          Write-Host "✅ Data berhasil terkirim ke Web Dashboard!"
-
-      - name: CEK RDP DI WEB DASHBOARD
-        run: |
-          Write-Host "`n=========================================";
-          Write-Host "RDP BERHASIL DIBUAT DAN DATA TERKIRIM!";
-          Write-Host "Silakan cek IP dan Password kamu di link ini:";
-          Write-Host "👉 https://webserver.up.railway.app/";
-          Write-Host "=========================================`n";
-
-      - name: Maintain Connection
-        run: |
+          Write-Host "Data berhasil terkirim ke Web Dashboard!"
+          
+          Write-Host "`n========================================="
+          Write-Host "RDP BERHASIL DIBUAT DAN SIAP DIGUNAKAN!"
+          Write-Host "👉 https://webserver.up.railway.app/"
+          Write-Host "=========================================`n"
+          
+          # Bagian ini menahan step agar tidak selesai, sehingga bore.exe tetap hidup!
           while ($true) { Write-Host "[$(Get-Date)] RDP Active - Server berjalan stabil"; Start-Sleep -Seconds 300; }
