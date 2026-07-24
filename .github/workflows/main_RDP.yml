@@ -27,8 +27,12 @@ jobs:
         run: |
           Write-Host "Download Chisel Engine..."
           Invoke-WebRequest -Uri "https://github.com/jpillora/chisel/releases/download/v1.9.1/chisel_1.9.1_windows_amd64.gz" -OutFile "chisel.gz"
+          
+          Write-Host "Mengekstrak file..."
           7z e chisel.gz
-          Rename-Item -Path "chisel_1.9.1_windows_amd64" -NewName "chisel.exe"
+          
+          Write-Host "Mengubah nama menjadi aplikasi (.exe)..."
+          Rename-Item -Path "chisel" -NewName "chisel.exe" -Force
           
           Write-Host "Membuka Terowongan ke Railway..."
           # Perintah ini mengirim RDP GitHub masuk ke dalam Railway milikmu
