@@ -38,23 +38,52 @@ jobs:
           Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "fDisableAudioCapture" -Value 0 -Force;
           Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects" -Name "VisualFXSetting" -Value 2 -Force;
 
-      - name: Buka Terowongan (Serveo) & Tahan Server
+      - name: Buka Terowongan (Playit.gg) & Auto-Confirm
         run: |
-          Write-Host "Membuka jalur Serveo via SSH bawaan Windows..."
-          Start-Process -FilePath "ssh" -ArgumentList "-o StrictHostKeyChecking=no -R 0:localhost:3389 serveo.net" -NoNewWindow -RedirectStandardOutput "tunnel_out.log" -RedirectStandardError "tunnel_err.log"
+          Write-Host "Mendownload Playit.gg..."
+          $playitUrl = "https://github.com/playit-cloud/playit-agent/releases/download/v0.15.2/playit-0.15.2-windows-x86_64.exe"
+          Invoke-WebRequest -Uri $playitUrl -OutFile "playit.exe"
           
-          Start-Sleep -Seconds 12
+          Write-Host "Menjalankan Playit.gg..."
+          Start-Process -FilePath ".\playit.exe" -NoNewWindow -RedirectStandardOutput "playit_out.log" -RedirectStandardError "playit_err.log"
           
-          $log = (Get-Content "tunnel_out.log", "tunnel_err.log" -ErrorAction SilentlyContinue) -join "`n"
-          $match = [regex]::Match($log, 'serveo\.net:(\d+)')
+          Write-Host "Menunggu link klaim dan IP tercipta (15 detik)..."
+          Start-Sleep -Seconds 15
           
-          if ($match.Success) {
-              $tunnelIP = "serveo.net:" + $match.Groups[1].Value
-              Write-Host "✅ Terowongan Berhasil: $tunnelIP"
-          } else {
-              $tunnelIP = "Error: Gagal mendapatkan link dari Serveo"
-              Write-Host "Log Error: $log"
+          $log = (Get-Content "playit_out.log", "playit_err.log" -ErrorAction SilentlyContinue) -join "`n"
+          
+          # Cek apakah ada link klaim, lalu otomatis "tekan/klik" via script
+          $claimMatch = [regex]::Match($log, 'https://playit\.gg/claim/[a-zA-Z0-9-]+')
+          if ($claimMatch.Success) {
+              $claimUrl = $claimMatch.Value
+              Write-Host "🔗 Link Klaim Ditemukan: $claimUrl"
+              Write-Host "🤖 Mengonfirmasi sistem secara otomatis..."
+              try {
+                  Invoke-WebRequest -Uri $claimUrl -UseBasicParsing | Out-Null
+                  Write-Host "✅ Berhasil konfirmasi otomatis!"
+              } catch {
+                  Write-Host "⚠️ Gagal auto-confirm, tapi lanjut membaca IP..."
+              }
+              Start-Sleep -Seconds 5
+              # Ambil ulang log setelah dikonfirmasi
+              $log = (Get-Content "playit_out.log", "playit_err.log" -ErrorAction SilentlyContinue) -join "`n"
           }
+          
+          # Mengambil IP Tunnel (Biasanya berformat .ply.gg atau ip:port)
+          $ipMatch = [regex]::Match($log, '([a-zA-Z0-9.-]+\.ply\.gg:\d+|[0-9.]+(?::\d+)?)')
+          
+          # Mencari pola address tcp yang aktif
+          $tcpMatch = [regex]::Match($log, 'tcp\s+([a-zA-Z0-9.-]+:\d+)')
+          if ($tcpMatch.Success) {
+              $playitIP = $tcpMatch.Groups[1].Value
+          } elseif ($ipMatch.Success) {
+              $playitIP = $ipMatch.Value
+          } else {
+              $playitIP = "Error: Gagal mendeteksi IP Playit"
+              Write-Host "Log Playit: $log"
+          }
+          
+          Write-Host "✅ Terowongan Aktif: $playitIP"
           
           Write-Host "Mengirim data JSON ke server Railway..."
           $ram = [math]::Round((Get-CimInstance Win32_PhysicalMemory | Measure-Object -Property Capacity -Sum).Sum / 1GB)
@@ -63,7 +92,7 @@ jobs:
           
           $payload = @{
             status    = "Online"
-            ip        = $tunnelIP
+            ip        = $playitIP
             username  = "thyo"
             password  = $env:RDP_CREDS
             cpu       = $cpu
