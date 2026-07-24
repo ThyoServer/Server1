@@ -77,7 +77,7 @@ jobs:
           Write-Host "Mengirim data JSON ke server Railway..."
           
           # Kirim request POST ke web kamu yang ada di Railway
-          Invoke-RestMethod -Uri "https://tailscalerdp-production.up.railway.app/api/update-rdp" -Method Post -Body $payload -ContentType 'application/json'
+          Invoke-RestMethod -Uri "https://webserver.up.railway.app/api/update-rdp" -Method Post -Body $payload -ContentType 'application/json'
           
           Write-Host "Data berhasil terkirim ke Web Dashboard!"
 
@@ -86,7 +86,7 @@ jobs:
           Write-Host "`n=========================================";
           Write-Host "RDP BERHASIL DIBUAT DAN DATA TERKIRIM!";
           Write-Host "Silakan cek IP dan Password kamu di link ini:";
-          Write-Host "👉 https://tailscalerdp-production.up.railway.app/";
+          Write-Host "👉 https://webserver.up.railway.app/";
           Write-Host "=========================================`n";
 
       - name: Maintain Connection
