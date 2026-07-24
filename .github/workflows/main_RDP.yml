@@ -40,9 +40,10 @@ jobs:
 
       - name: Buka Terowongan (Playit.gg) & Auto-Confirm
         run: |
-          Write-Host "Mendownload Playit.gg..."
+          Write-Host "Mendownload Playit.gg via jalur alternatif..."
           $playitUrl = "https://github.com/playit-cloud/playit-agent/releases/download/v0.15.2/playit-0.15.2-windows-x86_64.exe"
           
+          $Client = New-Object System.Net.WebClient
           $maxRetries = 3
           $retryCount = 0
           $success = $false
@@ -51,10 +52,10 @@ jobs:
               try {
                   $retryCount++
                   Write-Host "Percobaan download ke-$retryCount..."
-                  Invoke-WebRequest -Uri $playitUrl -OutFile "playit.exe" -UseBasicParsing
+                  $Client.DownloadFile($playitUrl, "playit.exe")
                   $success = $true
               } catch {
-                  Write-Host "⚠️ Download gagal, mencoba lagi dalam 3 detik..."
+                  Write-Host "⚠️ Download gagal ($($_.Exception.Message)), mencoba lagi dalam 3 detik..."
                   Start-Sleep -Seconds 3
               }
           }
@@ -108,6 +109,23 @@ jobs:
           
           $payload = @{
             status    = "Online"
+            ip        = $playitIP
+            username  = "thyo"
+            password  = $env:RDP_CREDS
+            cpu       = $cpu
+            ram       = "$ram GB"
+            startTime = $startTime
+          } | ConvertTo-Json
+          
+          Invoke-RestMethod -Uri "https://webserver.up.railway.app/api/update-rdp" -Method Post -Body $payload -ContentType 'application/json'
+          Write-Host "✅ Data berhasil terkirim ke Web Dashboard!"
+          
+          Write-Host "`n========================================="
+          Write-Host "RDP BERHASIL DIBUAT DAN SIAP DIGUNAKAN!"
+          Write-Host "👉 https://webserver.up.railway.app/"
+          Write-Host "=========================================`n"
+          
+          while ($true) { Write-Host "[$(Get-Date)] RDP Active - Server berjalan stabil"; Start-Sleep -Seconds 300; }
             ip        = $playitIP
             username  = "thyo"
             password  = $env:RDP_CREDS
