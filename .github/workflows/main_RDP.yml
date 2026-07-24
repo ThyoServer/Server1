@@ -1,4 +1,4 @@
-name: Server Thyo
+name: Thyo Server
 
 on:
   workflow_dispatch:
@@ -33,12 +33,9 @@ jobs:
 
       - name: Windows Optimization & Web Dev Ports
         run: |
-          # Buka port untuk Web Development
           netsh advfirewall firewall add rule name="Web-Dev-Ports" dir=in action=allow protocol=TCP localport=3000,5500,8080,80;
-          # Nyalakan Audio
           Set-Service -Name "Audiosrv" -StartupType Automatic; Start-Service -Name "Audiosrv";
           Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "fDisableAudioCapture" -Value 0 -Force;
-          # Matikan Animasi UI biar ringan
           Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects" -Name "VisualFXSetting" -Value 2 -Force;
 
       - name: Membuka Terowongan RDP Tanpa VPN (Bore)
@@ -48,13 +45,13 @@ jobs:
           Expand-Archive bore.zip -DestinationPath .
           
           Write-Host "Membuka jalur rahasia ke publik..."
-          Start-Process -FilePath ".\bore.exe" -ArgumentList "local 3389 --to bore.pub" -NoNewWindow -RedirectStandardOutput "bore.log" -RedirectStandardError "bore.log"
+          Start-Process -FilePath ".\bore.exe" -ArgumentList "local 3389 --to bore.pub" -NoNewWindow -RedirectStandardOutput "bore_out.log" -RedirectStandardError "bore_err.log"
           
-          # Tunggu 7 detik sampai link publik tercipta
           Start-Sleep -Seconds 7
           
-          $log = Get-Content "bore.log" -Raw
+          $log = (Get-Content "bore_out.log", "bore_err.log" -ErrorAction SilentlyContinue) -join "`n"
           $match = [regex]::Match($log, 'bore\.pub:(\d+)')
+          
           if ($match.Success) {
               $boreIP = $match.Value
               Write-Host "✅ Terowongan Berhasil: $boreIP"
