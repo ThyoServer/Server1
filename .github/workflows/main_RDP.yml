@@ -40,8 +40,8 @@ jobs:
 
       - name: Buka Terowongan (Playit.gg) & Auto-Confirm
         run: |
-          Write-Host "Mendownload Playit.gg via jalur alternatif..."
-          $playitUrl = "https://github.com/playit-cloud/playit-agent/releases/download/v0.15.2/playit-0.15.2-windows-x86_64.exe"
+          Write-Host "Mendownload Playit.gg versi terbaru..."
+          $playitUrl = "https://github.com/playit-cloud/playit-agent/releases/latest/download/playit-windows-x86_64.exe"
           
           $Client = New-Object System.Net.WebClient
           $maxRetries = 3
