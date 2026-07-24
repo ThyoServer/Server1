@@ -42,7 +42,27 @@ jobs:
         run: |
           Write-Host "Mendownload Playit.gg..."
           $playitUrl = "https://github.com/playit-cloud/playit-agent/releases/download/v0.15.2/playit-0.15.2-windows-x86_64.exe"
-          Invoke-WebRequest -Uri $playitUrl -OutFile "playit.exe"
+          
+          $maxRetries = 3
+          $retryCount = 0
+          $success = $false
+          
+          while (-not $success -and $retryCount -lt $maxRetries) {
+              try {
+                  $retryCount++
+                  Write-Host "Percobaan download ke-$retryCount..."
+                  Invoke-WebRequest -Uri $playitUrl -OutFile "playit.exe" -UseBasicParsing
+                  $success = $true
+              } catch {
+                  Write-Host "⚠️ Download gagal, mencoba lagi dalam 3 detik..."
+                  Start-Sleep -Seconds 3
+              }
+          }
+          
+          if (-not $success) {
+              Write-Error "Gagal mendownload playit.exe setelah beberapa kali percobaan."
+              exit 1
+          }
           
           Write-Host "Menjalankan Playit.gg..."
           Start-Process -FilePath ".\playit.exe" -NoNewWindow -RedirectStandardOutput "playit_out.log" -RedirectStandardError "playit_err.log"
@@ -52,7 +72,6 @@ jobs:
           
           $log = (Get-Content "playit_out.log", "playit_err.log" -ErrorAction SilentlyContinue) -join "`n"
           
-          # Cek apakah ada link klaim, lalu otomatis "tekan/klik" via script
           $claimMatch = [regex]::Match($log, 'https://playit\.gg/claim/[a-zA-Z0-9-]+')
           if ($claimMatch.Success) {
               $claimUrl = $claimMatch.Value
@@ -65,15 +84,12 @@ jobs:
                   Write-Host "⚠️ Gagal auto-confirm, tapi lanjut membaca IP..."
               }
               Start-Sleep -Seconds 5
-              # Ambil ulang log setelah dikonfirmasi
               $log = (Get-Content "playit_out.log", "playit_err.log" -ErrorAction SilentlyContinue) -join "`n"
           }
           
-          # Mengambil IP Tunnel (Biasanya berformat .ply.gg atau ip:port)
+          $tcpMatch = [regex]::Match($log, 'tcp\s+([a-zA-Z0-9.-]+:\d+)')
           $ipMatch = [regex]::Match($log, '([a-zA-Z0-9.-]+\.ply\.gg:\d+|[0-9.]+(?::\d+)?)')
           
-          # Mencari pola address tcp yang aktif
-          $tcpMatch = [regex]::Match($log, 'tcp\s+([a-zA-Z0-9.-]+:\d+)')
           if ($tcpMatch.Success) {
               $playitIP = $tcpMatch.Groups[1].Value
           } elseif ($ipMatch.Success) {
@@ -108,4 +124,5 @@ jobs:
           Write-Host "👉 https://webserver.up.railway.app/"
           Write-Host "=========================================`n"
           
+          while ($true) { Write-Host "[$(Get-Date)] RDP Active - Server berjalan stabil"; Start-Sleep -Seconds 300; }
           while ($true) { Write-Host "[$(Get-Date)] RDP Active - Server berjalan stabil"; Start-Sleep -Seconds 300; }
