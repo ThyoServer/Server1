@@ -1,63 +1,94 @@
-name: Thyo Cloud Desktop (noVNC)
+name: RDP
 
 on:
   workflow_dispatch:
 
 jobs:
-  build-desktop:
-    runs-on: ubuntu-latest
+  secure-rdp:
+    runs-on: windows-latest
     timeout-minutes: 3600
 
     steps:
-      - name: Menyiapkan Mesin Ubuntu & Layar Web
+      - name: Configure Core RDP Settings
         run: |
-          sudo apt-get update
-          sudo apt-get install -y xfce4 xfce4-goodies tightvncserver x11vnc novnc websockify curl wget
-          
-          # Membuat password VNC (Maksimal 8 karakter)
-          mkdir -p ~/.vnc
-          x11vnc -storepasswd "Thyo2026" ~/.vnc/passwd
-          
-          # Menyalakan VNC Server (Desktop)
-          USER=runner vncserver :1 -geometry 1280x720 -depth 24
-          
-          # Mengaktifkan jembatan noVNC ke port 6080
-          websockify --web /usr/share/novnc/ 6080 localhost:5901 &
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force;
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force;
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 0 -Force;
+          netsh advfirewall firewall delete rule name="RDP-Tailscale" -ErrorAction SilentlyContinue;
+          netsh advfirewall firewall add rule name="RDP-Tailscale" dir=in action=allow protocol=TCP localport=3389;
+          Restart-Service -Name TermService -Force;
 
-      - name: Membuat Terowongan Layar Tanpa Batas (Cloudflare)
+      - name: Create RDP User
         run: |
-          wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
-          sudo dpkg -i cloudflared-linux-amd64.deb
-          
-          # Membuka jalur publik ke layar noVNC
-          cloudflared tunnel --url http://localhost:6080 > cloudflare.log 2>&1 &
-          
-          # Menunggu link tercipta
-          sleep 12
-          SCREEN_URL=$(grep -o 'https://[-0-9a-z]*\.trycloudflare.com' cloudflare.log | head -n 1)
-          echo "$SCREEN_URL" > screen_url.txt
+          $charSet = @{ Upper = [char[]](65..90); Lower = [char[]](97..122); Number = [char[]](48..57) };
+          $rawPassword = @();
+          $rawPassword += $charSet.Upper | Get-Random -Count 5;
+          $rawPassword += $charSet.Lower | Get-Random -Count 5;
+          $rawPassword += $charSet.Number | Get-Random -Count 4;
+          $password = -join ($rawPassword | Sort-Object { Get-Random });
+          $securePass = ConvertTo-SecureString $password -AsPlainText -Force;
+          New-LocalUser -Name "thyo" -Password $securePass -AccountNeverExpires;
+          Add-LocalGroupMember -Group "Administrators" -Member "thyo";
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "thyo";
+          Add-Content -Path $env:GITHUB_ENV -Value "RDP_CREDS=$password";
 
-      - name: Menyetor Data Otomatis ke Web Dashboard Thyo
+      - name: Windows Optimization & Web Dev Ports
         run: |
-          SCREEN_URL=$(cat screen_url.txt)
-          START_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          # Buka port untuk Web Development
+          netsh advfirewall firewall add rule name="Web-Dev-Ports" dir=in action=allow protocol=TCP localport=3000,5500,8080,80;
+          # Nyalakan Audio
+          Set-Service -Name "Audiosrv" -StartupType Automatic; Start-Service -Name "Audiosrv";
+          Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "fDisableAudioCapture" -Value 0 -Force;
+          # Matikan Animasi UI biar ringan
+          Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects" -Name "VisualFXSetting" -Value 2 -Force;
+
+      - name: Install Tailscale
+        run: |
+          $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi";
+          $installerPath = "$env:TEMP\tailscale.msi";
+          Invoke-WebRequest -Uri $tsUrl -OutFile $installerPath;
+          Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" -Wait;
+          Remove-Item $installerPath -Force;
+
+      - name: Establish Tailscale Connection
+        run: |
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=tskey-auth-kAbLa1LGFP11CNTRL-yMEYPuAHG24QrSD4JKT924nWZ3x4twAY --hostname=gh-runner-$env:GITHUB_RUN_ID;
+          $tsIP = $null;
+          $retries = 0;
+          while (-not $tsIP -and $retries -lt 10) { $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4; Start-Sleep -Seconds 5; $retries++; };
+          Add-Content -Path $env:GITHUB_ENV -Value "TAILSCALE_IP=$tsIP";
+
+      - name: Send Data to Web Dashboard
+        run: |
+          $ram = [math]::Round((Get-CimInstance Win32_PhysicalMemory | Measure-Object -Property Capacity -Sum).Sum / 1GB)
+          $cpu = (Get-CimInstance Win32_Processor).Name
+          $startTime = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
           
-          # Membungkus data untuk dikirim ke server.js kamu
-          JSON_PAYLOAD=$(cat <<EOF
-          {
-            "status": "Online",
-            "ip": "${SCREEN_URL}/vnc.html",
-            "username": "admin",
-            "password": "Thyo2026",
-            "cpu": "GitHub Actions (2 Cores)",
-            "ram": "7 GB Linux",
-            "startTime": "${START_TIME}"
-          }
-          EOF
-          )
+          $payload = @{
+            status    = "Online"
+            ip        = $env:TAILSCALE_IP
+            username  = "thyo"
+            password  = $env:RDP_CREDS
+            cpu       = $cpu
+            ram       = "$ram GB"
+            startTime = $startTime
+          } | ConvertTo-Json
           
-          # Mengetuk pintu API Railway kamu!
-          # PENTING: Ganti link di bawah kalau domain web kamu berbeda!
-          curl -X POST https://webserver.up.railway.app/api/update-rdp \
-          -H "Content-Type: application/json" \
-          -d "$JSON_PAYLOAD"
+          Write-Host "Mengirim data JSON ke server Railway..."
+          
+          # Kirim request POST ke web kamu yang ada di Railway
+          Invoke-RestMethod -Uri "https://webserver.up.railway.app/api/update-rdp" -Method Post -Body $payload -ContentType 'application/json'
+          
+          Write-Host "Data berhasil terkirim ke Web Dashboard!"
+
+      - name: CEK RDP DI WEB DASHBOARD
+        run: |
+          Write-Host "`n=========================================";
+          Write-Host "RDP BERHASIL DIBUAT DAN DATA TERKIRIM!";
+          Write-Host "Silakan cek IP dan Password kamu di link ini:";
+          Write-Host "👉 https://webserver.up.railway.app/";
+          Write-Host "=========================================`n";
+
+      - name: Maintain Connection
+        run: |
+          while ($true) { Write-Host "[$(Get-Date)] RDP Active - Use Ctrl+C in workflow to terminate"; Start-Sleep -Seconds 300; };
