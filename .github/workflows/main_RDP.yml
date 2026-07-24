@@ -1,41 +1,63 @@
-name: Thyo Private Tunnel RDP
+name: Thyo Cloud Desktop (noVNC)
 
 on:
   workflow_dispatch:
 
 jobs:
-  build-rdp:
-    runs-on: windows-latest
+  build-desktop:
+    runs-on: ubuntu-latest
     timeout-minutes: 3600
 
     steps:
-      - name: Konfigurasi Windows RDP
+      - name: Menyiapkan Mesin Ubuntu & Layar Web
         run: |
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 0 -Force
-          netsh advfirewall firewall add rule name="RDP-Tunnel" dir=in action=allow protocol=TCP localport=3389
-          Restart-Service -Name TermService -Force
+          sudo apt-get update
+          sudo apt-get install -y xfce4 xfce4-goodies tightvncserver x11vnc novnc websockify curl wget
           
-          Write-Host "Membuat Akun RDP..."
-          $password = ConvertTo-SecureString "ThyoRDP123" -AsPlainText -Force
-          New-LocalUser -Name "admin_user" -Password $password -AccountNeverExpires
-          Add-LocalGroupMember -Group "Administrators" -Member "admin_user"
-          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "admin_user"
+          # Membuat password VNC (Maksimal 8 karakter)
+          mkdir -p ~/.vnc
+          x11vnc -storepasswd "Thyo2026" ~/.vnc/passwd
+          
+          # Menyalakan VNC Server (Desktop)
+          USER=runner vncserver :1 -geometry 1280x720 -depth 24
+          
+          # Mengaktifkan jembatan noVNC ke port 6080
+          websockify --web /usr/share/novnc/ 6080 localhost:5901 &
 
-      - name: Menghubungkan ke Server Railway Thyo
+      - name: Membuat Terowongan Layar Tanpa Batas (Cloudflare)
         run: |
-          Write-Host "Download Chisel Engine..."
-          Invoke-WebRequest -Uri "https://github.com/jpillora/chisel/releases/download/v1.9.1/chisel_1.9.1_windows_amd64.gz" -OutFile "chisel.gz"
+          wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+          sudo dpkg -i cloudflared-linux-amd64.deb
           
-          Write-Host "Mengekstrak file ke folder sementara..."
-          # Ekstrak file dan masukkan otomatis ke folder bernama "temp_chisel"
-          7z e chisel.gz -o"temp_chisel"
+          # Membuka jalur publik ke layar noVNC
+          cloudflared tunnel --url http://localhost:6080 > cloudflare.log 2>&1 &
           
-          Write-Host "Memaksa perubahan nama menjadi .exe..."
-          # Pindahkan apa pun isi dari folder temp_chisel dan jadikan chisel.exe
-          Move-Item -Path "temp_chisel\*" -Destination "chisel.exe" -Force
+          # Menunggu link tercipta
+          sleep 12
+          SCREEN_URL=$(grep -o 'https://[-0-9a-z]*\.trycloudflare.com' cloudflare.log | head -n 1)
+          echo "$SCREEN_URL" > screen_url.txt
+
+      - name: Menyetor Data Otomatis ke Web Dashboard Thyo
+        run: |
+          SCREEN_URL=$(cat screen_url.txt)
+          START_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           
-          Write-Host "Membuka Terowongan ke Railway..."
-          # Perintah ini mengirim RDP GitHub masuk ke dalam Railway milikmu
-          .\chisel.exe client https://serverubuntu.up.railway.app R:3389:127.0.0.1:3389
+          # Membungkus data untuk dikirim ke server.js kamu
+          JSON_PAYLOAD=$(cat <<EOF
+          {
+            "status": "Online",
+            "ip": "${SCREEN_URL}/vnc.html",
+            "username": "admin",
+            "password": "Thyo2026",
+            "cpu": "GitHub Actions (2 Cores)",
+            "ram": "7 GB Linux",
+            "startTime": "${START_TIME}"
+          }
+          EOF
+          )
+          
+          # Mengetuk pintu API Railway kamu!
+          # PENTING: Ganti link di bawah kalau domain web kamu berbeda!
+          curl -X POST https://webserver.up.railway.app/api/update-rdp \
+          -H "Content-Type: application/json" \
+          -d "$JSON_PAYLOAD"
