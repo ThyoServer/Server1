@@ -107,7 +107,7 @@ jobs:
           $cpu = (Get-CimInstance Win32_Processor).Name
           $startTime = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
           
-          $payload = @{
+          $payloadObj = @{
             status    = "Online"
             ip        = $playitIP
             username  = "thyo"
@@ -115,7 +115,8 @@ jobs:
             cpu       = $cpu
             ram       = "$ram GB"
             startTime = $startTime
-          } | ConvertTo-Json
+          }
+          $payload = $payloadObj | ConvertTo-Json
           
           Invoke-RestMethod -Uri "https://webserver.up.railway.app/api/update-rdp" -Method Post -Body $payload -ContentType 'application/json'
           Write-Host "✅ Data berhasil terkirim ke Web Dashboard!"
@@ -125,22 +126,4 @@ jobs:
           Write-Host "👉 https://webserver.up.railway.app/"
           Write-Host "=========================================`n"
           
-          while ($true) { Write-Host "[$(Get-Date)] RDP Active - Server berjalan stabil"; Start-Sleep -Seconds 300; }
-            ip        = $playitIP
-            username  = "thyo"
-            password  = $env:RDP_CREDS
-            cpu       = $cpu
-            ram       = "$ram GB"
-            startTime = $startTime
-          } | ConvertTo-Json
-          
-          Invoke-RestMethod -Uri "https://webserver.up.railway.app/api/update-rdp" -Method Post -Body $payload -ContentType 'application/json'
-          Write-Host "✅ Data berhasil terkirim ke Web Dashboard!"
-          
-          Write-Host "`n========================================="
-          Write-Host "RDP BERHASIL DIBUAT DAN SIAP DIGUNAKAN!"
-          Write-Host "👉 https://webserver.up.railway.app/"
-          Write-Host "=========================================`n"
-          
-          while ($true) { Write-Host "[$(Get-Date)] RDP Active - Server berjalan stabil"; Start-Sleep -Seconds 300; }
           while ($true) { Write-Host "[$(Get-Date)] RDP Active - Server berjalan stabil"; Start-Sleep -Seconds 300; }
