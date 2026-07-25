@@ -38,26 +38,26 @@ jobs:
           Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "fDisableAudioCapture" -Value 0 -Force;
           Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects" -Name "VisualFXSetting" -Value 2 -Force;
 
-      - name: Buka Terowongan (Tuns.sh) & Kirim Data
+      - name: Buka Terowongan (Bore) & Kirim Data
         run: |
-          Write-Host "Membuat 'KTP' (SSH Key) otomatis agar tidak ditolak server..."
-          mkdir -Force "$env:USERPROFILE\.ssh" -ErrorAction SilentlyContinue | Out-Null
-          ssh-keygen -t ed25519 -f "$env:USERPROFILE\.ssh\id_ed25519" -N "" -q
+          Write-Host "Mendownload mesin Bore..."
+          Invoke-WebRequest -Uri "https://github.com/ekzhang/bore/releases/download/v0.5.1/bore-v0.5.1-x86_64-pc-windows-msvc.zip" -OutFile "bore.zip"
+          Expand-Archive bore.zip -DestinationPath .
           
-          Write-Host "Membuka terowongan via Tuns.sh..."
-          Start-Process -FilePath "ssh" -ArgumentList "-o StrictHostKeyChecking=no -o ServerAliveInterval=60 -R 0:localhost:3389 tuns.sh" -NoNewWindow -RedirectStandardOutput "tunnel_out.log" -RedirectStandardError "tunnel_err.log"
+          Write-Host "Membuka terowongan publik via Bore..."
+          Start-Process -FilePath ".\bore.exe" -ArgumentList "local 3389 --to bore.pub" -NoNewWindow -RedirectStandardOutput "bore_out.log" -RedirectStandardError "bore_err.log"
           
-          Write-Host "Menunggu port terowongan aktif (12 detik)..."
-          Start-Sleep -Seconds 12
+          Write-Host "Menunggu port terowongan aktif (8 detik)..."
+          Start-Sleep -Seconds 8
           
-          $log = (Get-Content "tunnel_out.log", "tunnel_err.log" -ErrorAction SilentlyContinue) -join "`n"
-          $match = [regex]::Match($log, 'tuns\.sh:(\d+)')
+          $log = (Get-Content "bore_out.log", "bore_err.log" -ErrorAction SilentlyContinue) -join "`n"
+          $match = [regex]::Match($log, 'bore\.pub:(\d+)')
           
           if ($match.Success) {
-              $tunnelIP = "tuns.sh:" + $match.Groups[1].Value
+              $boreIP = $match.Value
           } else {
-              $tunnelIP = "Error: Gagal mendeteksi IP"
-              Write-Host "⚠️ Log Terowongan: $log"
+              $boreIP = "Error: Gagal mendeteksi IP Bore"
+              Write-Host "⚠️ Log Bore: $log"
           }
           
           Write-Host "Mengirim data JSON ke server Railway..."
@@ -67,7 +67,7 @@ jobs:
           
           $payloadObj = @{
             status    = "Online"
-            ip        = $tunnelIP
+            ip        = $boreIP
             username  = "thyo"
             password  = $env:RDP_CREDS
             cpu       = $cpu
@@ -78,20 +78,20 @@ jobs:
           
           Invoke-RestMethod -Uri "https://webserver.up.railway.app/api/update-rdp" -Method Post -Body $payload -ContentType 'application/json'
           
-          # 1. TAMPILAN SUKSES DI ATAS SESUAI PERMINTAAN
+          # 1. TAMPILAN SUKSES DI ATAS
           Write-Host "`n===================================================="
           Write-Host "RDP BERHASIL DIBUAT DAN SIAP DIGUNAKAN!"
           Write-Host "===================================================="
-          Write-Host "📍 IP Address  : $tunnelIP"
+          Write-Host "📍 IP Address  : $boreIP"
           Write-Host "👤 Username    : thyo"
           Write-Host "🔑 Password    : $($env:RDP_CREDS)"
           Write-Host "===================================================="
           Write-Host "👉 https://webserver.up.railway.app/"
           Write-Host "====================================================`n"
           
-          # 2. KONSOL PENJAGA DI BAWAH AGAR SERVER HIDUP 6 JAM
+          # 2. KONSOL PENJAGA DI BAWAH (HIDUP 6 JAM)
           Write-Host "Memulai konsol penjaga server agar tetap aktif..."
           while ($true) { 
-              Write-Host "[$(Get-Date)] RDP Active - Server berjalan stabil"
+              Write-Host "[$(Get-Date)] RDP Active - Server berjalan stabil via Bore"
               Start-Sleep -Seconds 300 
           }
