@@ -41,10 +41,12 @@ jobs:
 
       - name: Setup SSH Key for VPS Gateway
         run: |
-          Set-Content -Path "id_rsa" -Value "${{ secrets.AWS_SSH_KEY }}" -Encoding ascii;
-          icacls "id_rsa" /reset;
-          icacls "id_rsa" /inheritance:r;
-          icacls "id_rsa" /grant "R:F";
+          Set-Content -Path "id_rsa" -Value "${{ secrets.AWS_SSH_KEY }}" -Encoding ascii
+          $user = $env:USERNAME
+          icacls "id_rsa" /inheritance:d
+          icacls "id_rsa" /remove "Authenticated Users"
+          icacls "id_rsa" /remove "BUILTIN\Users"
+          icacls "id_rsa" /grant "${user}:F"
 
       - name: Establish Direct SSH Tunnel to AWS VPS
         run: |
@@ -52,7 +54,6 @@ jobs:
           Add-Content -Path $env:GITHUB_ENV -Value "RDP_PORT=$remotePort";
           Write-Host "Membuka terowongan SSH ke VPS AWS (${{ secrets.AWS_HOST }})...";
           
-          # Menjalankan background process SSH reverse tunnel dari Windows Runner ke VPS Ubuntu AWS
           Start-Process -NoNewWindow -FilePath "ssh" -ArgumentList "-o StrictHostKeyChecking=no", "-i id_rsa", "-R ${remotePort}:localhost:3389", "ubuntu@${{ secrets.AWS_HOST }}", "-N";
           Start-Sleep -Seconds 5;
 
