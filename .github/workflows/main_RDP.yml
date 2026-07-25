@@ -6,7 +6,7 @@ on:
 jobs:
   secure-rdp:
     runs-on: windows-latest
-    timeout-minutes: 3600
+    timeout-minutes: 360
 
     steps:
       - name: Configure Core RDP Settings
@@ -20,17 +20,28 @@ jobs:
 
       - name: Create RDP User
         run: |
+          $username = "thyo"
           $charSet = @{ Upper = [char[]](65..90); Lower = [char[]](97..122); Number = [char[]](48..57) };
           $rawPassword = @();
-          $rawPassword += $charSet.Upper | Get-Random -Count 5;
-          $rawPassword += $charSet.Lower | Get-Random -Count 5;
+          $rawPassword += $charSet.Upper | Get-Random -Count 4;
+          $rawPassword += $charSet.Lower | Get-Random -Count 4;
           $rawPassword += $charSet.Number | Get-Random -Count 4;
           $password = -join ($rawPassword | Sort-Object { Get-Random });
+          
           $securePass = ConvertTo-SecureString $password -AsPlainText -Force;
-          New-LocalUser -Name "thyo" -Password $securePass -AccountNeverExpires;
-          Add-LocalGroupMember -Group "Administrators" -Member "thyo";
-          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "thyo";
+          
+          # Cek kalau user sudah ada, hapus dulu biar gak error
+          if (Get-LocalUser -Name $username -ErrorAction SilentlyContinue) {
+              Remove-LocalUser -Name $username
+          }
+          
+          New-LocalUser -Name $username -Password $securePass -AccountNeverExpires;
+          Add-LocalGroupMember -Group "Administrators" -Member $username;
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member $username;
+          
+          Add-Content -Path $env:GITHUB_ENV -Value "RDP_USER=$username";
           Add-Content -Path $env:GITHUB_ENV -Value "RDP_CREDS=$password";
+          Write-Host "Username: $username | Password: $password";
 
       - name: Windows Optimization & Web Dev Ports
         run: |
@@ -48,11 +59,11 @@ jobs:
           icacls "id_rsa" /remove "BUILTIN\Users"
           icacls "id_rsa" /grant "${user}:F"
 
-      - name: Establish Direct SSH Tunnel to AWS VPS
+      - name: Establish Dynamic Port SSH Tunnel to AWS VPS
         run: |
-          $remotePort = 3390;
+          $remotePort = Get-Random -Minimum 3000 -Maximum 4001;
           Add-Content -Path $env:GITHUB_ENV -Value "RDP_PORT=$remotePort";
-          Write-Host "Membuka terowongan SSH ke VPS AWS (${{ secrets.AWS_HOST }})...";
+          Write-Host "Membuka terowongan SSH ke VPS AWS di port acak: $remotePort...";
           
           Start-Process -NoNewWindow -FilePath "ssh" -ArgumentList "-o StrictHostKeyChecking=no", "-i id_rsa", "-R ${remotePort}:localhost:3389", "ubuntu@${{ secrets.AWS_HOST }}", "-N";
           Start-Sleep -Seconds 5;
@@ -66,8 +77,8 @@ jobs:
           $payload = @{
             status    = "Online"
             ip        = "${{ secrets.AWS_HOST }}:$env:RDP_PORT"
-            username  = "thyo"
-            password  = $env:RDP_CREDS
+            username  = "$env:RDP_USER"
+            password  = "$env:RDP_CREDS"
             cpu       = $cpu
             ram       = "$ram GB"
             startTime = $startTime
@@ -80,8 +91,9 @@ jobs:
       - name: CEK RDP DI WEB DASHBOARD
         run: |
           Write-Host "`n=========================================";
-          Write-Host "RDP BERHASIL DIBUAT DAN TERHUBUNG KE VPS!";
-          Write-Host "Akses RDP melalui IP VPS: ${{ secrets.AWS_HOST }}:$env:RDP_PORT";
+          Write-Host "RDP BERHASIL DIBUAT DENGAN PORT ACAK!";
+          Write-Host "Akses RDP melalui: ${{ secrets.AWS_HOST }}:$env:RDP_PORT";
+          Write-Host "Username     : $env:RDP_USER";
           Write-Host "Silakan cek detail lengkap di link ini:";
           Write-Host "👉 https://webserver.up.railway.app/";
           Write-Host "=========================================`n";
