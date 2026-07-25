@@ -29,11 +29,7 @@ jobs:
           $password = -join ($rawPassword | Sort-Object { Get-Random });
           
           $securePass = ConvertTo-SecureString $password -AsPlainText -Force;
-          
-          if (Get-LocalUser -Name $username -ErrorAction SilentlyContinue) {
-              Remove-LocalUser -Name $username
-          }
-          
+          if (Get-LocalUser -Name $username -ErrorAction SilentlyContinue) { Remove-LocalUser -Name $username }
           New-LocalUser -Name $username -Password $securePass -AccountNeverExpires;
           Add-LocalGroupMember -Group "Administrators" -Member $username;
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member $username;
@@ -41,13 +37,6 @@ jobs:
           Add-Content -Path $env:GITHUB_ENV -Value "RDP_USER=$username";
           Add-Content -Path $env:GITHUB_ENV -Value "RDP_CREDS=$password";
           Write-Host "Username: $username | Password: $password";
-
-      - name: Windows Optimization & Web Dev Ports
-        run: |
-          netsh advfirewall firewall add rule name="Web-Dev-Ports" dir=in action=allow protocol=TCP localport=3000,5500,8080,80;
-          Set-Service -Name "Audiosrv" -StartupType Automatic; Start-Service -Name "Audiosrv";
-          Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "fDisableAudioCapture" -Value 0 -Force;
-          Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects" -Name "VisualFXSetting" -Value 2 -Force;
 
       - name: Setup SSH Key for VPS Gateway
         run: |
@@ -58,26 +47,18 @@ jobs:
           icacls "id_rsa" /remove "BUILTIN\Users"
           icacls "id_rsa" /grant "${user}:F"
 
-      - name: Establish Dynamic Port SSH Tunnel to AWS VPS
+      - name: Generate Port & Send Data to Dashboard
         run: |
           $remotePort = Get-Random -Minimum 3000 -Maximum 4001;
           Add-Content -Path $env:GITHUB_ENV -Value "RDP_PORT=$remotePort";
-          Write-Host "Membuka terowongan SSH ke VPS AWS di port acak: $remotePort...";
           
-          # Gunakan CMD.exe agar kebal dari error karakter PowerShell
-          $sshCmd = "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=NUL -i id_rsa -R 0.0.0.0:${remotePort}:localhost:3389 ubuntu@${{ secrets.AWS_HOST }} -N"
-          Start-Process -NoNewWindow -FilePath "cmd.exe" -ArgumentList "/c $sshCmd"
-          Start-Sleep -Seconds 5;
-
-      - name: Send Data to Web Dashboard
-        run: |
           $ram = [math]::Round((Get-CimInstance Win32_PhysicalMemory | Measure-Object -Property Capacity -Sum).Sum / 1GB)
           $cpu = (Get-CimInstance Win32_Processor).Name
           $startTime = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
           
           $payload = @{
             status    = "Online"
-            ip        = "${{ secrets.AWS_HOST }}:$env:RDP_PORT"
+            ip        = "${{ secrets.AWS_HOST }}:$remotePort"
             username  = "$env:RDP_USER"
             password  = "$env:RDP_CREDS"
             cpu       = $cpu
@@ -86,17 +67,17 @@ jobs:
           } | ConvertTo-Json
           
           Invoke-RestMethod -Uri "https://webserver.up.railway.app/api/update-rdp" -Method Post -Body $payload -ContentType 'application/json'
+          Write-Host "Data berhasil dikirim ke Web Dashboard dengan Port: $remotePort"
 
-      - name: CEK RDP DI WEB DASHBOARD
+      - name: Establish SSH Tunnel & Keep Alive
         run: |
           Write-Host "`n=========================================";
           Write-Host "RDP BERHASIL DIBUAT DENGAN PORT ACAK!";
           Write-Host "Akses RDP melalui: ${{ secrets.AWS_HOST }}:$env:RDP_PORT";
           Write-Host "Username     : $env:RDP_USER";
-          Write-Host "Silakan cek detail lengkap di link ini:";
-          Write-Host "👉 https://webserver.up.railway.app/";
+          Write-Host "Silakan cek detail lengkap di Web Dashboard";
           Write-Host "=========================================`n";
-
-      - name: Maintain Connection
-        run: |
-          while ($true) { Write-Host "[$(Get-Date)] RDP Active via AWS VPS Tunnel"; Start-Sleep -Seconds 300; };
+          
+          Write-Host "Membuka terowongan SSH (Proses ini akan menahan koneksi agar tetap hidup)..."
+          # Perintah SSH dijalankan langsung agar jika error, log-nya terbaca jelas
+          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=NUL -i id_rsa -R ${env:RDP_PORT}:localhost:3389 ubuntu@${{ secrets.AWS_HOST }} -N
