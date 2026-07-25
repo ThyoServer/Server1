@@ -1,4 +1,4 @@
-name: Thyo Server
+name: RDP
 
 on:
   workflow_dispatch:
@@ -14,7 +14,8 @@ jobs:
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force;
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force;
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 0 -Force;
-          netsh advfirewall firewall add rule name="RDP-Tunnel" dir=in action=allow protocol=TCP localport=3389;
+          netsh advfirewall firewall delete rule name="RDP-Inbound" -ErrorAction SilentlyContinue;
+          netsh advfirewall firewall add rule name="RDP-Inbound" dir=in action=allow protocol=TCP localport=3389;
           Restart-Service -Name TermService -Force;
 
       - name: Create RDP User
@@ -38,60 +39,52 @@ jobs:
           Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "fDisableAudioCapture" -Value 0 -Force;
           Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects" -Name "VisualFXSetting" -Value 2 -Force;
 
-      - name: Buka Terowongan (Bore) & Kirim Data
+      - name: Setup SSH Key for VPS Gateway
         run: |
-          Write-Host "Mendownload mesin Bore..."
-          Invoke-WebRequest -Uri "https://github.com/ekzhang/bore/releases/download/v0.5.1/bore-v0.5.1-x86_64-pc-windows-msvc.zip" -OutFile "bore.zip"
-          Expand-Archive bore.zip -DestinationPath .
+          Set-Content -Path "id_rsa" -Value "${{ secrets.AWS_SSH_KEY }}" -Encoding ascii;
+          icacls "id_rsa" /reset;
+          icacls "id_rsa" /inheritance:r;
+          icacls "id_rsa" /grant "R:F";
+
+      - name: Establish Direct SSH Tunnel to AWS VPS
+        run: |
+          $remotePort = 3390;
+          Add-Content -Path $env:GITHUB_ENV -Value "RDP_PORT=$remotePort";
+          Write-Host "Membuka terowongan SSH ke VPS AWS (${{ secrets.AWS_HOST }})...";
           
-          Write-Host "Membuka terowongan publik via Bore..."
-          Start-Process -FilePath ".\bore.exe" -ArgumentList "local 3389 --to bore.pub" -NoNewWindow -RedirectStandardOutput "bore_out.log" -RedirectStandardError "bore_err.log"
-          
-          Write-Host "Menunggu port terowongan aktif (8 detik)..."
-          Start-Sleep -Seconds 8
-          
-          $log = (Get-Content "bore_out.log", "bore_err.log" -ErrorAction SilentlyContinue) -join "`n"
-          $match = [regex]::Match($log, 'bore\.pub:(\d+)')
-          
-          if ($match.Success) {
-              $boreIP = $match.Value
-          } else {
-              $boreIP = "Error: Gagal mendeteksi IP Bore"
-              Write-Host "⚠️ Log Bore: $log"
-          }
-          
-          Write-Host "Mengirim data JSON ke server Railway..."
+          # Menjalankan background process SSH reverse tunnel dari Windows Runner ke VPS Ubuntu AWS
+          Start-Process -NoNewWindow -FilePath "ssh" -ArgumentList "-o StrictHostKeyChecking=no", "-i id_rsa", "-R ${remotePort}:localhost:3389", "ubuntu@${{ secrets.AWS_HOST }}", "-N";
+          Start-Sleep -Seconds 5;
+
+      - name: Send Data to Web Dashboard
+        run: |
           $ram = [math]::Round((Get-CimInstance Win32_PhysicalMemory | Measure-Object -Property Capacity -Sum).Sum / 1GB)
           $cpu = (Get-CimInstance Win32_Processor).Name
           $startTime = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
           
-          $payloadObj = @{
+          $payload = @{
             status    = "Online"
-            ip        = $boreIP
+            ip        = "${{ secrets.AWS_HOST }}:$env:RDP_PORT"
             username  = "thyo"
             password  = $env:RDP_CREDS
             cpu       = $cpu
             ram       = "$ram GB"
             startTime = $startTime
-          }
-          $payload = $payloadObj | ConvertTo-Json
+          } | ConvertTo-Json
           
+          Write-Host "Mengirim data JSON ke server Railway..."
           Invoke-RestMethod -Uri "https://webserver.up.railway.app/api/update-rdp" -Method Post -Body $payload -ContentType 'application/json'
-          
-          # 1. TAMPILAN SUKSES DI ATAS
-          Write-Host "`n===================================================="
-          Write-Host "RDP BERHASIL DIBUAT DAN SIAP DIGUNAKAN!"
-          Write-Host "===================================================="
-          Write-Host "📍 IP Address  : $boreIP"
-          Write-Host "👤 Username    : thyo"
-          Write-Host "🔑 Password    : $($env:RDP_CREDS)"
-          Write-Host "===================================================="
-          Write-Host "👉 https://webserver.up.railway.app/"
-          Write-Host "====================================================`n"
-          
-          # 2. KONSOL PENJAGA DI BAWAH (HIDUP 6 JAM)
-          Write-Host "Memulai konsol penjaga server agar tetap aktif..."
-          while ($true) { 
-              Write-Host "[$(Get-Date)] RDP Active - Server berjalan stabil via Bore"
-              Start-Sleep -Seconds 300 
-          }
+          Write-Host "Data berhasil terkirim ke Web Dashboard!"
+
+      - name: CEK RDP DI WEB DASHBOARD
+        run: |
+          Write-Host "`n=========================================";
+          Write-Host "RDP BERHASIL DIBUAT DAN TERHUBUNG KE VPS!";
+          Write-Host "Akses RDP melalui IP VPS: ${{ secrets.AWS_HOST }}:$env:RDP_PORT";
+          Write-Host "Silakan cek detail lengkap di link ini:";
+          Write-Host "👉 https://webserver.up.railway.app/";
+          Write-Host "=========================================`n";
+
+      - name: Maintain Connection
+        run: |
+          while ($true) { Write-Host "[$(Get-Date)] RDP Active via AWS VPS Tunnel"; Start-Sleep -Seconds 300; };
