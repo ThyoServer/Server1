@@ -65,7 +65,7 @@ jobs:
           Add-Content -Path $env:GITHUB_ENV -Value "RDP_PORT=$remotePort";
           Write-Host "Membuka terowongan SSH ke VPS AWS di port acak: $remotePort...";
           
-          Start-Process -NoNewWindow -FilePath "ssh" -ArgumentList "-o StrictHostKeyChecking=no", "-i id_rsa", "-R ${remotePort}:localhost:3389", "ubuntu@${{ secrets.AWS_HOST }}", "-N";
+          Start-Process -NoNewWindow -FilePath "ssh" -ArgumentList "-o StrictHostKeyChecking=no", "-i id_rsa", "-R", "*:${remotePort}:localhost:3389", "ubuntu@${{ secrets.AWS_HOST }}", "-N";
           Start-Sleep -Seconds 5;
 
       - name: Send Data to Web Dashboard
