@@ -38,6 +38,13 @@ jobs:
           Add-Content -Path $env:GITHUB_ENV -Value "RDP_CREDS=$password";
           Write-Host "Username: $username | Password: $password";
 
+      - name: Windows Optimization & Web Dev Ports
+        run: |
+          netsh advfirewall firewall add rule name="Web-Dev-Ports" dir=in action=allow protocol=TCP localport=3000,5500,8080,80;
+          Set-Service -Name "Audiosrv" -StartupType Automatic; Start-Service -Name "Audiosrv";
+          Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "fDisableAudioCapture" -Value 0 -Force;
+          Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects" -Name "VisualFXSetting" -Value 2 -Force;
+
       - name: Setup SSH Key for VPS Gateway
         run: |
           Set-Content -Path "id_rsa" -Value "${{ secrets.AWS_SSH_KEY }}" -Encoding ascii
@@ -58,26 +65,25 @@ jobs:
           
           $payload = @{
             status    = "Online"
-            ip        = "${{ secrets.AWS_HOST }}:$remotePort"
+            ip        = "thyoserver.web.id:$remotePort"
             username  = "$env:RDP_USER"
             password  = "$env:RDP_CREDS"
-            cpu       = $cpu
+            cpu       = "$cpu"
             ram       = "$ram GB"
-            startTime = $startTime
+            startTime = "$startTime"
           } | ConvertTo-Json
           
           Invoke-RestMethod -Uri "https://webserver.up.railway.app/api/update-rdp" -Method Post -Body $payload -ContentType 'application/json'
-          Write-Host "Data berhasil dikirim ke Web Dashboard dengan Port: $remotePort"
+          Write-Host "Data berhasil dikirim ke Web Dashboard!"
 
       - name: Establish SSH Tunnel & Keep Alive
         run: |
           Write-Host "`n=========================================";
-          Write-Host "RDP BERHASIL DIBUAT DENGAN PORT ACAK!";
-          Write-Host "Akses RDP melalui: ${{ secrets.AWS_HOST }}:$env:RDP_PORT";
+          Write-Host "RDP SIAP DENGAN DOMAIN KUSTOM!";
+          Write-Host "Akses RDP melalui: thyoserver.web.id:$env:RDP_PORT";
           Write-Host "Username     : $env:RDP_USER";
-          Write-Host "Silakan cek detail lengkap di Web Dashboard";
+          Write-Host "Password     : $env:RDP_CREDS";
           Write-Host "=========================================`n";
           
-          Write-Host "Membuka terowongan SSH (Proses ini akan menahan koneksi agar tetap hidup)..."
-          # Perintah SSH dijalankan langsung agar jika error, log-nya terbaca jelas
-          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=NUL -i id_rsa -R ${env:RDP_PORT}:localhost:3389 ubuntu@${{ secrets.AWS_HOST }} -N
+          Write-Host "Membuka terowongan SSH dengan proteksi Anti-Idle..."
+          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=NUL -o ServerAliveInterval=60 -i id_rsa -R ${env:RDP_PORT}:localhost:3389 ubuntu@${{ secrets.AWS_HOST }} -N
