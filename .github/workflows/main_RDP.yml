@@ -38,75 +38,23 @@ jobs:
           Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "fDisableAudioCapture" -Value 0 -Force;
           Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects" -Name "VisualFXSetting" -Value 2 -Force;
 
-      - name: Buka Terowongan (Playit.gg) & Auto-Confirm
+      - name: Buka Terowongan (Tuns.sh) & Kirim Data
         run: |
-          Write-Host "Mendownload Playit.gg versi terbaru..."
-          $playitUrl = "https://github.com/playit-cloud/playit-agent/releases/latest/download/playit-windows-x86_64.exe"
+          Write-Host "Membuka terowongan via Tuns.sh (Jalur Alternatif Serveo)..."
+          Start-Process -FilePath "ssh" -ArgumentList "-o StrictHostKeyChecking=no -o ServerAliveInterval=60 -R 0:localhost:3389 tuns.sh" -NoNewWindow -RedirectStandardOutput "tunnel_out.log" -RedirectStandardError "tunnel_err.log"
           
-          $Client = New-Object System.Net.WebClient
-          $maxRetries = 3
-          $retryCount = 0
-          $success = $false
+          Write-Host "Menunggu port terowongan aktif (10 detik)..."
+          Start-Sleep -Seconds 10
           
-          while (-not $success -and $retryCount -lt $maxRetries) {
-              try {
-                  $retryCount++
-                  Write-Host "Percobaan download ke-$retryCount..."
-                  $Client.DownloadFile($playitUrl, "playit.exe")
-                  $success = $true
-              } catch {
-                  Write-Host "⚠️ Download gagal ($($_.Exception.Message)), mencoba lagi dalam 3 detik..."
-                  Start-Sleep -Seconds 3
-              }
+          $log = (Get-Content "tunnel_out.log", "tunnel_err.log" -ErrorAction SilentlyContinue) -join "`n"
+          $match = [regex]::Match($log, 'tuns\.sh:(\d+)')
+          
+          if ($match.Success) {
+              $tunnelIP = "tuns.sh:" + $match.Groups[1].Value
+          } else {
+              $tunnelIP = "Error: Gagal mendeteksi IP"
+              Write-Host "⚠️ Log Terowongan: $log"
           }
-          
-          if (-not $success) {
-              Write-Error "Gagal mendownload playit.exe setelah beberapa kali percobaan."
-              exit 1
-          }
-          
-          Write-Host "Menjalankan Playit.gg..."
-          Start-Process -FilePath ".\playit.exe" -NoNewWindow -RedirectStandardOutput "playit_out.log" -RedirectStandardError "playit_err.log"
-          
-          Write-Host "Menunggu link klaim dan IP tercipta (20 detik)..."
-          Start-Sleep -Seconds 20
-          
-          $log = (Get-Content "playit_out.log", "playit_err.log" -ErrorAction SilentlyContinue) -join "`n"
-          
-          $claimMatch = [regex]::Match($log, 'https://playit\.gg/claim/[a-zA-Z0-9-]+')
-          if ($claimMatch.Success) {
-              $claimUrl = $claimMatch.Value
-              Write-Host "🔗 Link Klaim Ditemukan: $claimUrl"
-              Write-Host "🤖 Mengonfirmasi sistem secara otomatis..."
-              try {
-                  Invoke-WebRequest -Uri $claimUrl -UseBasicParsing | Out-Null
-                  Write-Host "✅ Berhasil konfirmasi otomatis!"
-              } catch {
-                  Write-Host "⚠️ Gagal auto-confirm, tapi lanjut membaca IP..."
-              }
-              Start-Sleep -Seconds 5
-              $log = (Get-Content "playit_out.log", "playit_err.log" -ErrorAction SilentlyContinue) -join "`n"
-          }
-          
-          # Pencarian IP/Port Playit yang akurat
-          $playitIP = "Error: Gagal mendeteksi IP Playit"
-          foreach ($line in ($log -split "`n")) {
-              if ($line -match '([a-zA-Z0-9-]+\.ply\.gg:\d+)') {
-                  $playitIP = $matches[1]
-                  break
-              } elseif ($line -match 'tcp\s+([0-9.]+|[a-zA-Z0-9.-]+):\d+') {
-                  if ($matches[0] -notmatch '2026') {
-                      $playitIP = $matches[1] + ":" + ($matches[0] -replace '.*:', '')
-                      break
-                  }
-              }
-          }
-          
-          if ($playitIP -eq "Error: Gagal mendeteksi IP Playit" -and $log -match '([a-zA-Z0-9-]{4,}\.ply\.gg:\d+)') {
-              $playitIP = $matches[1]
-          }
-          
-          Write-Host "✅ Terowongan Aktif: $playitIP"
           
           Write-Host "Mengirim data JSON ke server Railway..."
           $ram = [math]::Round((Get-CimInstance Win32_PhysicalMemory | Measure-Object -Property Capacity -Sum).Sum / 1GB)
@@ -115,7 +63,7 @@ jobs:
           
           $payloadObj = @{
             status    = "Online"
-            ip        = $playitIP
+            ip        = $tunnelIP
             username  = "thyo"
             password  = $env:RDP_CREDS
             cpu       = $cpu
@@ -125,20 +73,19 @@ jobs:
           $payload = $payloadObj | ConvertTo-Json
           
           Invoke-RestMethod -Uri "https://webserver.up.railway.app/api/update-rdp" -Method Post -Body $payload -ContentType 'application/json'
-          Write-Host "✅ Data berhasil terkirim ke Web Dashboard!"
           
-          # 1. CETAK INFORMASI RDP SUKSES DI ATAS
+          # 1. TAMPILAN SUKSES DI ATAS SESUAI PERMINTAAN
           Write-Host "`n===================================================="
           Write-Host "RDP BERHASIL DIBUAT DAN SIAP DIGUNAKAN!"
           Write-Host "===================================================="
-          Write-Host "📍 IP Address  : $playitIP"
+          Write-Host "📍 IP Address  : $tunnelIP"
           Write-Host "👤 Username    : thyo"
           Write-Host "🔑 Password    : $($env:RDP_CREDS)"
           Write-Host "===================================================="
           Write-Host "👉 https://webserver.up.railway.app/"
           Write-Host "====================================================`n"
           
-          # 2. BARU DI BAWAHNYA MASUK KE CONSOLE LOADING / STABILIZER SERVER
+          # 2. KONSOL PENJAGA DI BAWAH AGAR SERVER HIDUP 6 JAM
           Write-Host "Memulai konsol penjaga server agar tetap aktif..."
           while ($true) { 
               Write-Host "[$(Get-Date)] RDP Active - Server berjalan stabil"
