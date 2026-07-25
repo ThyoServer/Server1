@@ -30,7 +30,6 @@ jobs:
           
           $securePass = ConvertTo-SecureString $password -AsPlainText -Force;
           
-          # Cek kalau user sudah ada, hapus dulu biar gak error
           if (Get-LocalUser -Name $username -ErrorAction SilentlyContinue) {
               Remove-LocalUser -Name $username
           }
@@ -65,7 +64,9 @@ jobs:
           Add-Content -Path $env:GITHUB_ENV -Value "RDP_PORT=$remotePort";
           Write-Host "Membuka terowongan SSH ke VPS AWS di port acak: $remotePort...";
           
-          Start-Process -NoNewWindow -FilePath "ssh" -ArgumentList "-o StrictHostKeyChecking=no", "-i id_rsa", "-R", "*:${remotePort}:localhost:3389", "ubuntu@${{ secrets.AWS_HOST }}", "-N";
+          # Gunakan CMD.exe agar kebal dari error karakter PowerShell
+          $sshCmd = "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=NUL -i id_rsa -R 0.0.0.0:${remotePort}:localhost:3389 ubuntu@${{ secrets.AWS_HOST }} -N"
+          Start-Process -NoNewWindow -FilePath "cmd.exe" -ArgumentList "/c $sshCmd"
           Start-Sleep -Seconds 5;
 
       - name: Send Data to Web Dashboard
@@ -84,9 +85,7 @@ jobs:
             startTime = $startTime
           } | ConvertTo-Json
           
-          Write-Host "Mengirim data JSON ke server Railway..."
           Invoke-RestMethod -Uri "https://webserver.up.railway.app/api/update-rdp" -Method Post -Body $payload -ContentType 'application/json'
-          Write-Host "Data berhasil terkirim ke Web Dashboard!"
 
       - name: CEK RDP DI WEB DASHBOARD
         run: |
