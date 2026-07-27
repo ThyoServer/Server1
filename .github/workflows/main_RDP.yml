@@ -75,7 +75,7 @@ jobs:
           } | ConvertTo-Json
           
           # GANTI URL DI BAWAH DENGAN DOMAIN WEB NEXT.JS RAILWAY KAMU
-          Invoke-RestMethod -Uri "https://LINK_RAILWAY_KAMU.up.railway.app/api/rdp" -Method Post -Body $payload -ContentType 'application/json'
+          Invoke-RestMethod -Uri "https://thyocloud.up.railway.app/api/rdp" -Method Post -Body $payload -ContentType 'application/json'
 
       - name: Establish SSH Tunnel & Keep Alive
         run: |
