@@ -36,7 +36,6 @@ jobs:
           
           Add-Content -Path $env:GITHUB_ENV -Value "RDP_USER=$username";
           Add-Content -Path $env:GITHUB_ENV -Value "RDP_CREDS=$password";
-          Write-Host "Username: $username | Password: $password";
 
       - name: Windows Optimization & Web Dev Ports
         run: |
@@ -61,29 +60,23 @@ jobs:
           
           $ram = [math]::Round((Get-CimInstance Win32_PhysicalMemory | Measure-Object -Property Capacity -Sum).Sum / 1GB)
           $cpu = (Get-CimInstance Win32_Processor).Name
-          $startTime = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
           
+          # ========================================================
+          # 🚨 UBAH "Server-1" DI BAWAH INI JIKA PINDAH REPOSITORI BARU
+          # ========================================================
           $payload = @{
+            serverId  = "Server-1" 
             status    = "Online"
             ip        = "thyoserver.web.id:$remotePort"
             username  = "$env:RDP_USER"
             password  = "$env:RDP_CREDS"
             cpu       = "$cpu"
             ram       = "$ram GB"
-            startTime = "$startTime"
           } | ConvertTo-Json
           
-          Invoke-RestMethod -Uri "https://webserver.up.railway.app/api/update-rdp" -Method Post -Body $payload -ContentType 'application/json'
-          Write-Host "Data berhasil dikirim ke Web Dashboard!"
+          # GANTI URL DI BAWAH DENGAN DOMAIN WEB NEXT.JS RAILWAY KAMU
+          Invoke-RestMethod -Uri "https://LINK_RAILWAY_KAMU.up.railway.app/api/rdp" -Method Post -Body $payload -ContentType 'application/json'
 
       - name: Establish SSH Tunnel & Keep Alive
         run: |
-          Write-Host "`n=========================================";
-          Write-Host "RDP SIAP DENGAN DOMAIN KUSTOM!";
-          Write-Host "Akses RDP melalui: thyoserver.web.id:$env:RDP_PORT";
-          Write-Host "Username     : $env:RDP_USER";
-          Write-Host "Password     : $env:RDP_CREDS";
-          Write-Host "=========================================`n";
-          
-          Write-Host "Membuka terowongan SSH dengan proteksi Anti-Idle..."
           ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=NUL -o ServerAliveInterval=60 -i id_rsa -R ${env:RDP_PORT}:localhost:3389 ubuntu@${{ secrets.AWS_HOST }} -N
