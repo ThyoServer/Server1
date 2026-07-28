@@ -62,33 +62,31 @@ jobs:
           $cpu = (Get-CimInstance Win32_Processor).Name
           
           # ========================================================
-          # 🚨 UBAH "Server-1" DI BAWAH INI SESUAI NAMA REPO-NYA
+          # 🚨 PENTING: UBAH "Server-1" DI BAWAH INI SESUAI REPO-NYA
+          # Contoh: Kalau ini repo kedua, ganti jadi "Server-2"
           # ========================================================
           $payload = @{
             action    = "register"
-            serverId  = "Server-1" 
+            serverId  = "Server1" 
             status    = "Online"
             ip        = "thyoserver.web.id:$remotePort"
             username  = "$env:RDP_USER"
             password  = "$env:RDP_CREDS"
             cpuName   = "$cpu"
-            ram       = "$ram GB"
+            ram       = "$ram"
           } | ConvertTo-Json
           
           Invoke-RestMethod -Uri "https://thyocloud.up.railway.app/api/rdp" -Method Post -Body $payload -ContentType 'application/json'
 
-      - name: Start Telemetry Spy Agent (Live CPU & Activity)
+      - name: Establish SSH Tunnel & Live Telemetry
         run: |
           $jobScript = {
             param($serverId, $apiUrl)
             while($true) {
               try {
-                # Cek Load CPU Realtime
                 $cpuLoad = [math]::Round((Get-CimInstance Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average)
-                
-                # Cek Aplikasi yang paling banyak makan memori/CPU saat ini
                 $topApp = (Get-Process | Where-Object {$_.MainWindowTitle -ne ""} | Sort-Object CPU -Descending | Select-Object -First 1 Name).Name
-                if ([string]::IsNullOrWhiteSpace($topApp)) { $topApp = "Idle / OS Background" }
+                if ([string]::IsNullOrWhiteSpace($topApp)) { $topApp = "System Idle" }
                 
                 $payload = @{
                   action   = "telemetry"
@@ -99,12 +97,14 @@ jobs:
                 
                 Invoke-RestMethod -Uri $apiUrl -Method Post -Body $payload -ContentType 'application/json' -ErrorAction SilentlyContinue
               } catch {}
-              Start-Sleep -Seconds 15
+              Start-Sleep -Seconds 10
             }
           }
-          # 🚨 JANGAN LUPA UBAH "Server-1" DI BAWAH INI JUGA!
+          
+          # ========================================================
+          # 🚨 PENTING: UBAH "Server-1" DI BAWAH INI JUGA!
+          # ========================================================
           Start-Job -ScriptBlock $jobScript -ArgumentList "Server1", "https://thyocloud.up.railway.app/api/rdp"
-
-      - name: Establish SSH Tunnel & Keep Alive
-        run: |
+          
+          # Tahan server tetap hidup dengan SSH Tunnel (Ini Mencegah Job Telemetry Terbunuh)
           ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=NUL -o ServerAliveInterval=60 -i id_rsa -R ${env:RDP_PORT}:localhost:3389 ubuntu@${{ secrets.AWS_HOST }} -N
