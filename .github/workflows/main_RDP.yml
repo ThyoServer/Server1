@@ -62,12 +62,11 @@ jobs:
           $cpu = (Get-CimInstance Win32_Processor).Name
           
           # ========================================================
-          # 🚨 PENTING: UBAH "Server-1" DI BAWAH INI SESUAI REPO-NYA
-          # Contoh: Kalau ini repo kedua, ganti jadi "Server-2"
+          # 🚨 PENTING: UBAH "Server-X" DI BAWAH INI SESUAI REPO-NYA
           # ========================================================
           $payload = @{
             action    = "register"
-            serverId  = "Server1" 
+            serverId  = "Server-1" 
             status    = "Online"
             ip        = "thyoserver.web.id:$remotePort"
             username  = "$env:RDP_USER"
@@ -102,9 +101,9 @@ jobs:
           }
           
           # ========================================================
-          # 🚨 PENTING: UBAH "Server-1" DI BAWAH INI JUGA!
+          # 🚨 PENTING: PASTIKAN SAMA DENGAN NAMA DI ATAS!
           # ========================================================
-          Start-Job -ScriptBlock $jobScript -ArgumentList "Server1", "https://thyocloud.up.railway.app/api/rdp"
+          Start-Job -ScriptBlock $jobScript -ArgumentList "Server-1", "https://thyocloud.up.railway.app/api/rdp"
           
           # Tahan server tetap hidup dengan SSH Tunnel (Ini Mencegah Job Telemetry Terbunuh)
           ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=NUL -o ServerAliveInterval=60 -i id_rsa -R ${env:RDP_PORT}:localhost:3389 ubuntu@${{ secrets.AWS_HOST }} -N
