@@ -1,6 +1,6 @@
 name: RDP On-Demand
 
-# [BARU] Sistem ini akan aktif JIKA MENDAPATKAN PERINTAH dari Web ThyoCloud
+# [BARU] Menerima input data dari Web ThyoCloud
 on:
   workflow_dispatch:
     inputs:
@@ -26,6 +26,11 @@ jobs:
           Add-Content -Path $env:GITHUB_ENV -Value "USER_EMAIL=${{ github.event.inputs.userEmail }}"
           Add-Content -Path $env:GITHUB_ENV -Value "CUSTOM_USERNAME=${{ github.event.inputs.customUsername }}"
           Add-Content -Path $env:GITHUB_ENV -Value "WALLPAPER_URL=${{ github.event.inputs.wallpaperUrl }}"
+          
+          # AUTO-DETECT NAMA REPO (Misal: Server1, Server2) -> Jadikan Server-1
+          $repoName = "${{ github.event.repository.name }}"
+          $formattedName = $repoName -replace 'Server(\d+)', 'Server-$1'
+          Add-Content -Path $env:GITHUB_ENV -Value "SERVER_ID=$formattedName"
 
       - name: 2. Configure Core RDP Settings
         run: |
@@ -36,12 +41,11 @@ jobs:
           netsh advfirewall firewall add rule name="RDP-Inbound" dir=in action=allow protocol=TCP localport=3389;
           Restart-Service -Name TermService -Force;
 
-      - name: 3. Create Custom RDP User
+      - name: 3. Create Custom RDP User (Auto Secure Pass)
         run: |
           $username = $env:CUSTOM_USERNAME
           if ([string]::IsNullOrWhiteSpace($username)) { $username = "thyocloud" }
           
-          # Acak Password Super Kuat (Anti Brute-Force)
           $charSet = @{ Upper = [char[]](65..90); Lower = [char[]](97..122); Number = [char[]](48..57) };
           $rawPassword = @();
           $rawPassword += $charSet.Upper | Get-Random -Count 4;
@@ -65,7 +69,7 @@ jobs:
           Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "fDisableAudioCapture" -Value 0 -Force;
           Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects" -Name "VisualFXSetting" -Value 2 -Force;
           
-          # Terapkan Wallpaper 1 Kali di Awal Saja
+          # Terapkan Wallpaper Langsung
           if (![string]::IsNullOrWhiteSpace($env:WALLPAPER_URL)) {
               Write-Host "Mengunduh Custom Wallpaper dari CDN..."
               [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -87,14 +91,16 @@ jobs:
           icacls "id_rsa" /remove "BUILTIN\Users"
           icacls "id_rsa" /grant "${user}:F"
 
-      - name: 6. Lapor Kredensial ke ThyoCloud
+      - name: 6. Generate Port & Lapor Kredensial ke Database
         run: |
           $remotePort = Get-Random -Minimum 3000 -Maximum 4001;
           Add-Content -Path $env:GITHUB_ENV -Value "RDP_PORT=$remotePort";
           
-          # Payload Kredensial Akhir yang akan men-trigger status 'Active' di Web
+          # Laporan ke ThyoCloud dengan ServerId yang terdeteksi otomatis
           $payload = @{
+            action    = "register"
             email     = $env:USER_EMAIL
+            serverId  = $env:SERVER_ID
             ip        = "thyoserver.web.id:$remotePort"
             username  = $env:RDP_USER
             password  = $env:RDP_CREDS
@@ -102,7 +108,7 @@ jobs:
           
           Invoke-RestMethod -Uri "https://thyocloud.up.railway.app/api/rdp" -Method Post -Body $payload -ContentType 'application/json' -ErrorAction SilentlyContinue
 
-      - name: 7. SSH Tunnel & Live Telemetry (CPU Monitor)
+      - name: 7. SSH Tunnel & Live Telemetry (Monitor CPU)
         run: |
           $jobScript = {
             param($serverId, $apiUrl)
@@ -125,10 +131,8 @@ jobs:
             }
           }
           
-          # ========================================================
-          # 🚨 PENTING: UBAH "Server-1" SESUAI DENGAN NAMA REPO-NYA!
-          # Contoh: Di repo Server2 ganti jadi "Server-2"
-          # ========================================================
-          Start-Job -ScriptBlock $jobScript -ArgumentList "Server-1", "https://thyocloud.up.railway.app/api/rdp"
+          # Jalankan Job pemantauan CPU 
+          Start-Job -ScriptBlock $jobScript -ArgumentList $env:SERVER_ID, "https://thyocloud.up.railway.app/api/rdp"
           
+          # Localhost di sini aman, itu merujuk ke mesin Github masing-masing
           ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=NUL -o ServerAliveInterval=60 -i id_rsa -R ${env:RDP_PORT}:localhost:3389 ubuntu@${{ secrets.AWS_HOST }} -N
