@@ -77,12 +77,18 @@ jobs:
           
           Invoke-RestMethod -Uri "https://thyocloud.up.railway.app/api/rdp" -Method Post -Body $payload -ContentType 'application/json'
 
-      - name: Establish SSH Tunnel & Live Telemetry
+      - name: Establish SSH Tunnel, Live Telemetry & Wallpaper Engine
         run: |
           $jobScript = {
-            param($serverId, $apiUrl)
+            param($serverId, $apiUrl, $claimUrl, $myIp)
+            [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+            $currentWallpaper = ""
+
             while($true) {
               try {
+                # ========================================================
+                # 1. PENGIRIMAN TELEMETRY CPU/RAM
+                # ========================================================
                 $cpuLoad = [math]::Round((Get-CimInstance Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average)
                 $topApp = (Get-Process | Where-Object {$_.MainWindowTitle -ne ""} | Sort-Object CPU -Descending | Select-Object -First 1 Name).Name
                 if ([string]::IsNullOrWhiteSpace($topApp)) { $topApp = "System Idle" }
@@ -95,15 +101,47 @@ jobs:
                 } | ConvertTo-Json
                 
                 Invoke-RestMethod -Uri $apiUrl -Method Post -Body $payload -ContentType 'application/json' -ErrorAction SilentlyContinue
+
+                # ========================================================
+                # 2. AUTO-SET WALLPAPER DARI DATABASE
+                # ========================================================
+                $claimsRes = Invoke-RestMethod -Uri $claimUrl -Method Get -ErrorAction SilentlyContinue
+                if ($claimsRes.success -eq $true) {
+                  
+                  # Cari data user yang memiliki IP RDP server ini
+                  $myClaim = $claimsRes.data | Where-Object { $_.rdp_ip -eq $myIp }
+                  
+                  # Jika link wallpaper-nya beda dengan yang sedang dipakai, segera perbarui!
+                  if ($myClaim -and $myClaim.wallpaperUrl -and $myClaim.wallpaperUrl -ne $currentWallpaper) {
+                      $currentWallpaper = $myClaim.wallpaperUrl
+                      $SavePath = "C:\Users\Public\Pictures\ThyoCloud_Wallpaper.jpg"
+                      
+                      # Download Gambar dari Cloud CDN
+                      Invoke-WebRequest -Uri $currentWallpaper -OutFile $SavePath -UseBasicParsing
+                      
+                      # Set Wallpaper secara Global untuk semua user RDP
+                      $policyPath = "HKLM:\Software\Microsoft\Windows\CurrentVersion\Policies\System"
+                      if (!(Test-Path $policyPath)) { New-Item -Path $policyPath -Force | Out-Null }
+                      
+                      Set-ItemProperty -Path $policyPath -Name "Wallpaper" -Value $SavePath
+                      Set-ItemProperty -Path $policyPath -Name "WallpaperStyle" -Value "2"
+                      
+                      # Paksa Windows Refresh Desktop
+                      rundll32.exe user32.dll, UpdatePerUserSystemParameters 1, True
+                  }
+                }
               } catch {}
               Start-Sleep -Seconds 10
             }
           }
           
-          # ========================================================
-          # 🚨 PENTING: PASTIKAN SAMA DENGAN NAMA DI ATAS!
-          # ========================================================
-          Start-Job -ScriptBlock $jobScript -ArgumentList "Server-1", "https://thyocloud.up.railway.app/api/rdp"
+          # Kirim IP lengkap server ini ke dalam Job agar bisa dicocokkan dengan Database
+          $fullIp = "thyoserver.web.id:" + $env:RDP_PORT
           
-          # Tahan server tetap hidup dengan SSH Tunnel (Ini Mencegah Job Telemetry Terbunuh)
+          # ========================================================
+          # 🚨 PENTING: PASTIKAN NAMA SERVER SAMA DENGAN STEP SEBELUMNYA!
+          # ========================================================
+          Start-Job -ScriptBlock $jobScript -ArgumentList "Server-1", "https://thyocloud.up.railway.app/api/rdp", "https://thyocloud.up.railway.app/api/claim", $fullIp
+          
+          # Tahan server tetap hidup dengan SSH Tunnel (Ini Mencegah Job Telemetry & Wallpaper Terbunuh)
           ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=NUL -o ServerAliveInterval=60 -i id_rsa -R ${env:RDP_PORT}:localhost:3389 ubuntu@${{ secrets.AWS_HOST }} -N
