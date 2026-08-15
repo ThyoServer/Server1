@@ -1,6 +1,5 @@
 name: RDP On-Demand
 
-# [BARU] Menerima input data dari Web ThyoCloud
 on:
   workflow_dispatch:
     inputs:
@@ -27,7 +26,6 @@ jobs:
           Add-Content -Path $env:GITHUB_ENV -Value "CUSTOM_USERNAME=${{ github.event.inputs.customUsername }}"
           Add-Content -Path $env:GITHUB_ENV -Value "WALLPAPER_URL=${{ github.event.inputs.wallpaperUrl }}"
           
-          # AUTO-DETECT NAMA REPO (Misal: Server1, Server2) -> Jadikan Server-1
           $repoName = "${{ github.event.repository.name }}"
           $formattedName = $repoName -replace 'Server(\d+)', 'Server-$1'
           Add-Content -Path $env:GITHUB_ENV -Value "SERVER_ID=$formattedName"
@@ -62,7 +60,7 @@ jobs:
           Add-Content -Path $env:GITHUB_ENV -Value "RDP_USER=$username";
           Add-Content -Path $env:GITHUB_ENV -Value "RDP_CREDS=$password";
 
-      - name: 4. Windows Optimization & Custom Wallpaper (Advanced Logon)
+      - name: 4. Windows Optimization & Custom Wallpaper (Safe Method)
         run: |
           netsh advfirewall firewall add rule name="Web-Dev-Ports" dir=in action=allow protocol=TCP localport=3000,5500,8080,80;
           Set-Service -Name "Audiosrv" -StartupType Automatic; Start-Service -Name "Audiosrv";
@@ -91,30 +89,23 @@ jobs:
               if (!(Test-Path $lockPath)) { New-Item -Path $lockPath -Force | Out-Null }
               Set-ItemProperty -Path $lockPath -Name "LockScreenImage" -Value $imagePath -Force
               
-              Write-Host "Membuat Script Logon Wallpaper..."
+              Write-Host "Membuat Script Logon Wallpaper (Safe Mode)..."
               $scriptPath = "C:\Windows\set_wallpaper.ps1"
               
-              $scriptContent = @'
-              Start-Sleep -Seconds 3
-              $imagePath = "C:\Users\Public\Pictures\ThyoCloud_Wallpaper.jpg"
-              Set-ItemProperty -Path 'HKCU:\Control Panel\Desktop' -Name "Wallpaper" -Value $imagePath -Force
-              Set-ItemProperty -Path 'HKCU:\Control Panel\Desktop' -Name "WallpaperStyle" -Value "10" -Force
-              Set-ItemProperty -Path 'HKCU:\Control Panel\Desktop' -Name "TileWallpaper" -Value "0" -Force
-              Add-Type -TypeDefinition @"
-              using System;
-              using System.Runtime.InteropServices;
-              public class Wallpaper {
-                  [DllImport("user32.dll", CharSet = CharSet.Auto)]
-                  public static extern int SystemParametersInfo(int uAction, int uParam, string lvParam, int fuWinIni);
-              }
-              "@
-              [Wallpaper]::SystemParametersInfo(20, 0, $imagePath, 3)
-              '#
-
-              $scriptContent.Replace("'#", "'@") | Out-File -FilePath $scriptPath -Encoding utf8 -Force
+              $scriptLines = @(
+                  "Start-Sleep -Seconds 3",
+                  "`$imagePath = 'C:\Users\Public\Pictures\ThyoCloud_Wallpaper.jpg'",
+                  "Set-ItemProperty -Path 'HKCU:\Control Panel\Desktop' -Name 'Wallpaper' -Value `$imagePath -Force",
+                  "Set-ItemProperty -Path 'HKCU:\Control Panel\Desktop' -Name 'WallpaperStyle' -Value '10' -Force",
+                  "Set-ItemProperty -Path 'HKCU:\Control Panel\Desktop' -Name 'TileWallpaper' -Value '0' -Force",
+                  "Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class Wallpaper { [DllImport(""user32.dll"", CharSet = CharSet.Auto)] public static extern int SystemParametersInfo(int uAction, int uParam, string lvParam, int fuWinIni); }'",
+                  "[Wallpaper]::SystemParametersInfo(20, 0, `$imagePath, 3)"
+              )
+              
+              [System.IO.File]::WriteAllLines($scriptPath, $scriptLines)
               
               Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run" -Name "SetCustomWallpaper" -Value "PowerShell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File C:\Windows\set_wallpaper.ps1" -Force
-              Write-Host "Script logon terpasang dengan aman."
+              Write-Host "Script logon terpasang dengan aman tanpa parser error."
           }
 
       - name: 5. Setup SSH Key for VPS Gateway
@@ -131,7 +122,6 @@ jobs:
           $remotePort = Get-Random -Minimum 3000 -Maximum 4001;
           Add-Content -Path $env:GITHUB_ENV -Value "RDP_PORT=$remotePort";
           
-          # Laporan ke ThyoCloud dengan ServerId yang terdeteksi otomatis
           $payload = @{
             action    = "register"
             email     = $env:USER_EMAIL
@@ -166,8 +156,6 @@ jobs:
             }
           }
           
-          # Jalankan Job pemantauan CPU 
           Start-Job -ScriptBlock $jobScript -ArgumentList $env:SERVER_ID, "https://thyocloud.up.railway.app/api/rdp"
           
-          # Localhost di sini aman, itu merujuk ke mesin Github masing-masing
           ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=NUL -o ServerAliveInterval=60 -i id_rsa -R ${env:RDP_PORT}:localhost:3389 ubuntu@${{ secrets.AWS_HOST }} -N
