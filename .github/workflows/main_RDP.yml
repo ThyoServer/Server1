@@ -1,7 +1,19 @@
-name: RDP
+name: RDP On-Demand
 
+# [BARU] Sistem ini akan aktif JIKA MENDAPATKAN PERINTAH dari Web ThyoCloud
 on:
   workflow_dispatch:
+    inputs:
+      userEmail:
+        description: 'Email User Pemesan'
+        required: true
+      customUsername:
+        description: 'Username Pilihan User'
+        required: true
+        default: 'thyocloud'
+      wallpaperUrl:
+        description: 'Link Wallpaper Custom'
+        required: false
 
 jobs:
   secure-rdp:
@@ -9,7 +21,13 @@ jobs:
     timeout-minutes: 360
 
     steps:
-      - name: Configure Core RDP Settings
+      - name: 1. Baca Perintah dari Web ThyoCloud
+        run: |
+          Add-Content -Path $env:GITHUB_ENV -Value "USER_EMAIL=${{ github.event.inputs.userEmail }}"
+          Add-Content -Path $env:GITHUB_ENV -Value "CUSTOM_USERNAME=${{ github.event.inputs.customUsername }}"
+          Add-Content -Path $env:GITHUB_ENV -Value "WALLPAPER_URL=${{ github.event.inputs.wallpaperUrl }}"
+
+      - name: 2. Configure Core RDP Settings
         run: |
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force;
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force;
@@ -18,9 +36,12 @@ jobs:
           netsh advfirewall firewall add rule name="RDP-Inbound" dir=in action=allow protocol=TCP localport=3389;
           Restart-Service -Name TermService -Force;
 
-      - name: Create RDP User
+      - name: 3. Create Custom RDP User
         run: |
-          $username = "thyo"
+          $username = $env:CUSTOM_USERNAME
+          if ([string]::IsNullOrWhiteSpace($username)) { $username = "thyocloud" }
+          
+          # Acak Password Super Kuat (Anti Brute-Force)
           $charSet = @{ Upper = [char[]](65..90); Lower = [char[]](97..122); Number = [char[]](48..57) };
           $rawPassword = @();
           $rawPassword += $charSet.Upper | Get-Random -Count 4;
@@ -37,14 +58,27 @@ jobs:
           Add-Content -Path $env:GITHUB_ENV -Value "RDP_USER=$username";
           Add-Content -Path $env:GITHUB_ENV -Value "RDP_CREDS=$password";
 
-      - name: Windows Optimization & Web Dev Ports
+      - name: 4. Windows Optimization & Custom Wallpaper
         run: |
           netsh advfirewall firewall add rule name="Web-Dev-Ports" dir=in action=allow protocol=TCP localport=3000,5500,8080,80;
           Set-Service -Name "Audiosrv" -StartupType Automatic; Start-Service -Name "Audiosrv";
           Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "fDisableAudioCapture" -Value 0 -Force;
           Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects" -Name "VisualFXSetting" -Value 2 -Force;
+          
+          # Terapkan Wallpaper 1 Kali di Awal Saja
+          if (![string]::IsNullOrWhiteSpace($env:WALLPAPER_URL)) {
+              Write-Host "Mengunduh Custom Wallpaper dari CDN..."
+              [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+              $SavePath = "C:\Users\Public\Pictures\ThyoCloud_Wallpaper.jpg"
+              Invoke-WebRequest -Uri $env:WALLPAPER_URL -OutFile $SavePath -UseBasicParsing
+              
+              $policyPath = "HKLM:\Software\Microsoft\Windows\CurrentVersion\Policies\System"
+              if (!(Test-Path $policyPath)) { New-Item -Path $policyPath -Force | Out-Null }
+              Set-ItemProperty -Path $policyPath -Name "Wallpaper" -Value $SavePath
+              Set-ItemProperty -Path $policyPath -Name "WallpaperStyle" -Value "2"
+          }
 
-      - name: Setup SSH Key for VPS Gateway
+      - name: 5. Setup SSH Key for VPS Gateway
         run: |
           Set-Content -Path "id_rsa" -Value "${{ secrets.AWS_SSH_KEY }}" -Encoding ascii
           $user = $env:USERNAME
@@ -53,42 +87,27 @@ jobs:
           icacls "id_rsa" /remove "BUILTIN\Users"
           icacls "id_rsa" /grant "${user}:F"
 
-      - name: Generate Port & Send Initial Data
+      - name: 6. Lapor Kredensial ke ThyoCloud
         run: |
           $remotePort = Get-Random -Minimum 3000 -Maximum 4001;
           Add-Content -Path $env:GITHUB_ENV -Value "RDP_PORT=$remotePort";
           
-          $ram = [math]::Round((Get-CimInstance Win32_PhysicalMemory | Measure-Object -Property Capacity -Sum).Sum / 1GB)
-          $cpu = (Get-CimInstance Win32_Processor).Name
-          
-          # ========================================================
-          # 🚨 PENTING: UBAH "Server-X" DI BAWAH INI SESUAI REPO-NYA
-          # ========================================================
+          # Payload Kredensial Akhir yang akan men-trigger status 'Active' di Web
           $payload = @{
-            action    = "register"
-            serverId  = "Server-1" 
-            status    = "Online"
+            email     = $env:USER_EMAIL
             ip        = "thyoserver.web.id:$remotePort"
-            username  = "$env:RDP_USER"
-            password  = "$env:RDP_CREDS"
-            cpuName   = "$cpu"
-            ram       = "$ram"
+            username  = $env:RDP_USER
+            password  = $env:RDP_CREDS
           } | ConvertTo-Json
           
-          Invoke-RestMethod -Uri "https://thyocloud.up.railway.app/api/rdp" -Method Post -Body $payload -ContentType 'application/json'
+          Invoke-RestMethod -Uri "https://thyocloud.up.railway.app/api/rdp" -Method Post -Body $payload -ContentType 'application/json' -ErrorAction SilentlyContinue
 
-      - name: Establish SSH Tunnel, Live Telemetry & Wallpaper Engine
+      - name: 7. SSH Tunnel & Live Telemetry (CPU Monitor)
         run: |
           $jobScript = {
-            param($serverId, $apiUrl, $claimUrl, $myIp)
-            [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-            $currentWallpaper = ""
-
+            param($serverId, $apiUrl)
             while($true) {
               try {
-                # ========================================================
-                # 1. PENGIRIMAN TELEMETRY CPU/RAM
-                # ========================================================
                 $cpuLoad = [math]::Round((Get-CimInstance Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average)
                 $topApp = (Get-Process | Where-Object {$_.MainWindowTitle -ne ""} | Sort-Object CPU -Descending | Select-Object -First 1 Name).Name
                 if ([string]::IsNullOrWhiteSpace($topApp)) { $topApp = "System Idle" }
@@ -101,47 +120,15 @@ jobs:
                 } | ConvertTo-Json
                 
                 Invoke-RestMethod -Uri $apiUrl -Method Post -Body $payload -ContentType 'application/json' -ErrorAction SilentlyContinue
-
-                # ========================================================
-                # 2. AUTO-SET WALLPAPER DARI DATABASE
-                # ========================================================
-                $claimsRes = Invoke-RestMethod -Uri $claimUrl -Method Get -ErrorAction SilentlyContinue
-                if ($claimsRes.success -eq $true) {
-                  
-                  # Cari data user yang memiliki IP RDP server ini
-                  $myClaim = $claimsRes.data | Where-Object { $_.rdp_ip -eq $myIp }
-                  
-                  # Jika link wallpaper-nya beda dengan yang sedang dipakai, segera perbarui!
-                  if ($myClaim -and $myClaim.wallpaperUrl -and $myClaim.wallpaperUrl -ne $currentWallpaper) {
-                      $currentWallpaper = $myClaim.wallpaperUrl
-                      $SavePath = "C:\Users\Public\Pictures\ThyoCloud_Wallpaper.jpg"
-                      
-                      # Download Gambar dari Cloud CDN
-                      Invoke-WebRequest -Uri $currentWallpaper -OutFile $SavePath -UseBasicParsing
-                      
-                      # Set Wallpaper secara Global untuk semua user RDP
-                      $policyPath = "HKLM:\Software\Microsoft\Windows\CurrentVersion\Policies\System"
-                      if (!(Test-Path $policyPath)) { New-Item -Path $policyPath -Force | Out-Null }
-                      
-                      Set-ItemProperty -Path $policyPath -Name "Wallpaper" -Value $SavePath
-                      Set-ItemProperty -Path $policyPath -Name "WallpaperStyle" -Value "2"
-                      
-                      # Paksa Windows Refresh Desktop
-                      rundll32.exe user32.dll, UpdatePerUserSystemParameters 1, True
-                  }
-                }
               } catch {}
               Start-Sleep -Seconds 10
             }
           }
           
-          # Kirim IP lengkap server ini ke dalam Job agar bisa dicocokkan dengan Database
-          $fullIp = "thyoserver.web.id:" + $env:RDP_PORT
-          
           # ========================================================
-          # 🚨 PENTING: PASTIKAN NAMA SERVER SAMA DENGAN STEP SEBELUMNYA!
+          # 🚨 PENTING: UBAH "Server-1" SESUAI DENGAN NAMA REPO-NYA!
+          # Contoh: Di repo Server2 ganti jadi "Server-2"
           # ========================================================
-          Start-Job -ScriptBlock $jobScript -ArgumentList "Server-1", "https://thyocloud.up.railway.app/api/rdp", "https://thyocloud.up.railway.app/api/claim", $fullIp
+          Start-Job -ScriptBlock $jobScript -ArgumentList "Server-1", "https://thyocloud.up.railway.app/api/rdp"
           
-          # Tahan server tetap hidup dengan SSH Tunnel (Ini Mencegah Job Telemetry & Wallpaper Terbunuh)
           ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=NUL -o ServerAliveInterval=60 -i id_rsa -R ${env:RDP_PORT}:localhost:3389 ubuntu@${{ secrets.AWS_HOST }} -N
