@@ -62,24 +62,62 @@ jobs:
           Add-Content -Path $env:GITHUB_ENV -Value "RDP_USER=$username";
           Add-Content -Path $env:GITHUB_ENV -Value "RDP_CREDS=$password";
 
-      - name: 4. Windows Optimization & Custom Wallpaper
+      - name: 4. Windows Optimization & Custom Wallpaper (Advanced Logon)
         run: |
           netsh advfirewall firewall add rule name="Web-Dev-Ports" dir=in action=allow protocol=TCP localport=3000,5500,8080,80;
           Set-Service -Name "Audiosrv" -StartupType Automatic; Start-Service -Name "Audiosrv";
           Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "fDisableAudioCapture" -Value 0 -Force;
           Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects" -Name "VisualFXSetting" -Value 2 -Force;
           
-          # Terapkan Wallpaper Langsung
+          # Terapkan Wallpaper Menggunakan Script Logon Lanjutan (Support All Image Sizes)
           if (![string]::IsNullOrWhiteSpace($env:WALLPAPER_URL)) {
               Write-Host "Mengunduh Custom Wallpaper dari CDN..."
               [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-              $SavePath = "C:\Users\Public\Pictures\ThyoCloud_Wallpaper.jpg"
-              Invoke-WebRequest -Uri $env:WALLPAPER_URL -OutFile $SavePath -UseBasicParsing
+              $imagePath = "C:\Users\Public\Pictures\ThyoCloud_Wallpaper.jpg"
               
-              $policyPath = "HKLM:\Software\Microsoft\Windows\CurrentVersion\Policies\System"
-              if (!(Test-Path $policyPath)) { New-Item -Path $policyPath -Force | Out-Null }
-              Set-ItemProperty -Path $policyPath -Name "Wallpaper" -Value $SavePath
-              Set-ItemProperty -Path $policyPath -Name "WallpaperStyle" -Value "2"
+              try {
+                  Invoke-WebRequest -Uri $env:WALLPAPER_URL -OutFile $imagePath -UseBasicParsing
+                  Write-Host "Download berhasil."
+              } catch {
+                  Write-Warning "Gagal download wallpaper, menggunakan default Windows."
+                  exit 0
+              }
+              
+              # Set Wallpaper Policy (Lock Screen & Global) - Angka 10 = Fill (Anti-Gepeng)
+              $wallpaperPath = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"
+              if (!(Test-Path $wallpaperPath)) { New-Item -Path $wallpaperPath -Force | Out-Null }
+              Set-ItemProperty -Path $wallpaperPath -Name "Wallpaper" -Value $imagePath -Force
+              Set-ItemProperty -Path $wallpaperPath -Name "WallpaperStyle" -Value "10" -Force
+              
+              $lockPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Personalization"
+              if (!(Test-Path $lockPath)) { New-Item -Path $lockPath -Force | Out-Null }
+              Set-ItemProperty -Path $lockPath -Name "LockScreenImage" -Value $imagePath -Force
+              
+              # Buat Script Logon Agar Muncul Saat User RDP Masuk
+              Write-Host "Membuat Script Logon Wallpaper..."
+              $scriptPath = "C:\Windows\set_wallpaper.ps1"
+              
+              @'
+              Start-Sleep -Seconds 3
+              $imagePath = "C:\Users\Public\Pictures\ThyoCloud_Wallpaper.jpg"
+              
+              Set-ItemProperty -Path 'HKCU:\Control Panel\Desktop' -Name "Wallpaper" -Value $imagePath -Force
+              Set-ItemProperty -Path 'HKCU:\Control Panel\Desktop' -Name "WallpaperStyle" -Value "10" -Force
+              Set-ItemProperty -Path 'HKCU:\Control Panel\Desktop' -Name "TileWallpaper" -Value "0" -Force
+              
+              Add-Type -TypeDefinition @"
+              using System;
+              using System.Runtime.InteropServices;
+              public class Wallpaper {
+                  [DllImport("user32.dll", CharSet = CharSet.Auto)]
+                  public static extern int SystemParametersInfo(int uAction, int uParam, string lvParam, int fuWinIni);
+              }
+              "@
+              [Wallpaper]::SystemParametersInfo(20, 0, $imagePath, 3)
+              '@ | Out-File -FilePath $scriptPath -Encoding utf8 -Force
+              
+              Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run" -Name "SetCustomWallpaper" -Value "PowerShell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File C:\Windows\set_wallpaper.ps1" -Force
+              Write-Host "Script logon terpasang. Wallpaper otomatis muncul setiap login RDP."
           }
 
       - name: 5. Setup SSH Key for VPS Gateway
